@@ -67,12 +67,6 @@
     return f ? `<a class="prov-link" href="${withDate(f)}">${esc(prov)}</a>` : esc(prov);
   };
 
-  function initProvinceMenu() {
-    const sel = document.getElementById("province-nav");
-    if (!sel) return;
-    sel.addEventListener("change", () => { if (sel.value) location.href = withDate(sel.value); });
-  }
-
   function initDateSelect() {
     const sel = document.getElementById("date-select");
     if (!sel) return;
@@ -1937,7 +1931,6 @@
   }
 
   initDateSelect();
-  initProvinceMenu();
   // téléphone : l'onglet actif est ramené au centre de la bande d'onglets qui défile
   (() => {
     const strip = document.querySelector(".tab-links"), act = strip && strip.querySelector(".tab.active");

@@ -51,7 +51,7 @@ def test_build_writes_every_page(tmp_path, monkeypatch):
     for prov, fname in (("Tshopo", "province-tshopo.html"), ("Haut-Uele", "province-haut-uele.html")):
         html = (tmp_path / fname).read_text(encoding="utf-8")
         assert f'data-province="{prov}"' in html and 'data-view="province"' in html
-        assert f'<option value="{fname}" selected>' in html
+        assert 'id="province-nav"' not in html  # menu Provinces retiré : on passe par la carte et les liens
     assert (tmp_path / "assets" / "dashboard.css").exists()
     geo = (tmp_path / "assets" / "geo.js").read_text(encoding="utf-8")
     assert geo.startswith("/* geo-cache-key: ") and "window.GEO=" in geo and "Makiso Kisangani" in geo

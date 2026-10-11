@@ -33,20 +33,6 @@ def _logo_tag() -> str:
             f'alt="INRB, INSP, UMIE, INOHA, Africa CDC, OMS">')
 
 
-def _province_menu(meta: dict, current: str | None) -> str:
-    pages = meta.get("province_pages") or {}
-    if not pages:
-        return ""
-    opts = "".join(
-        f'<option value="{html.escape(fname)}"{" selected" if prov == current else ""}>{html.escape(prov)}</option>'
-        for prov, fname in sorted(pages.items())
-    )
-    placeholder = "" if current else '<option value="" selected disabled>Choisir…</option>'
-    cls = "province-menu active" if current else "province-menu"
-    return (f'<div class="{cls}"><label for="province-nav">Provinces</label>'
-            f'<select id="province-nav" aria-label="Résumé par province">{placeholder}{opts}</select></div>')
-
-
 def render_page(view_id: str, title: str, body: str, payload: dict, province: str | None = None,
                 with_map: bool = False) -> str:
     meta = payload.get("meta", {})
@@ -104,7 +90,6 @@ def render_page(view_id: str, title: str, body: str, payload: dict, province: st
 <nav class="tabs" aria-label="Pages du tableau de bord">
 {tabs}
 <div class="nav-controls">
-  {_province_menu(meta, province)}
   <div class="date-picker">
     <label for="date-select">Date du rapport</label>
     <select id="date-select" aria-label="Date du rapport"></select>
