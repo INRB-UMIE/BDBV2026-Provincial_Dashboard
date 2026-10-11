@@ -1,0 +1,8 @@
+.DS_Store
+**/__pycache__/
+.pytest_cache/
+.venv/
+# pages générées (la CI les produit et les publie)
+output/
+/*.html
+/assets/

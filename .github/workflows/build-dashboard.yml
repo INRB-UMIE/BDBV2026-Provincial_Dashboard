@@ -1,0 +1,199 @@
+# Build output/{index,zones,tendances,alertes-contacts,qualite,province-<slug>}.html + output/assets/
+# and sync repo-root copies for GitHub Pages.
+#
+# Same contract as BDBV2026-Epidemic_Dashboard/.github/workflows/build-dashboard.yml:
+# triggered on dashboard pushes to main, via repository_dispatch `data-updated`
+# from BDBV2026-Provincial_Reports' release.yml, or manually.
+#
+# Secrets:
+#   EXTERNAL_REPO_TOKEN  fine-grained PAT, Contents: Read on
+#                        INRB-UMIE/BDBV2026-Provincial_Reports (private repo).
+
+name: Build dashboard
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "output/**"
+      - "index.html"
+      - "zones.html"
+      - "tendances.html"
+      - "alertes-contacts.html"
+      - "qualite.html"
+      - "piliers.html"
+      - "kpi-piliers.html"
+      - "semaine.html"
+      - "synthese.html"
+      - "province-*.html"
+      - "assets/**"
+      - "pr-preview/**"
+  workflow_dispatch:
+    inputs:
+      data_repo_ref:
+        description: "BDBV2026-Provincial_Reports git ref (branch, tag, or SHA). Leave empty for latest GitHub release."
+        required: false
+        default: ""
+  repository_dispatch:
+    types: [data-updated]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATA_REPO: INRB-UMIE/BDBV2026-Provincial_Reports
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve refs
+        id: refs
+        env:
+          # private data repo: the default GITHUB_TOKEN cannot read its releases
+          GH_TOKEN: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          resolve_latest_data_ref() {
+            if release_json="$(gh release view --repo "${DATA_REPO}" --json targetCommitish,tagName 2>/dev/null)"; then
+              ref="$(jq -r '.targetCommitish' <<< "${release_json}")"
+              tag="$(jq -r '.tagName' <<< "${release_json}")"
+              echo "Using latest ${DATA_REPO} release ${tag} @ ${ref}" >&2
+              echo "${ref}"
+              return
+            fi
+            echo "::warning::No GitHub release found on ${DATA_REPO}; falling back to main." >&2
+            echo "main"
+          }
+
+          DASH_REF="${{ github.ref_name }}"
+          DATA_REF=""
+
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            if [ -n "${{ github.event.client_payload.dashboard_branch }}" ]; then
+              DASH_REF="${{ github.event.client_payload.dashboard_branch }}"
+            fi
+            if [ -n "${{ github.event.client_payload.data_ref }}" ]; then
+              DATA_REF="${{ github.event.client_payload.data_ref }}"
+            elif [ -n "${{ github.event.client_payload.sha }}" ]; then
+              DATA_REF="${{ github.event.client_payload.sha }}"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ inputs.data_repo_ref }}" ]; then
+              DATA_REF="${{ inputs.data_repo_ref }}"
+            fi
+          fi
+
+          if [ -z "${DATA_REF}" ]; then
+            DATA_REF="$(resolve_latest_data_ref)"
+          fi
+
+          echo "dashboard_ref=${DASH_REF}" >> "$GITHUB_OUTPUT"
+          echo "data_ref=${DATA_REF}" >> "$GITHUB_OUTPUT"
+          echo "Dashboard branch: ${DASH_REF}"
+          echo "Data ref: ${DATA_REF}"
+
+      - name: Checkout dashboard
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.dashboard_ref }}
+          path: dashboard
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # build/, qa/ and data/presentations (extraction_*.json of the pipeline): no LFS,
+      # so the .pptx are never pulled (only their small LFS pointers).
+      - name: Checkout data repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          ref: ${{ steps.refs.outputs.data_ref }}
+          path: BDBV2026-Provincial_Reports
+          token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+          sparse-checkout: |
+            build
+            qa
+            data/presentations
+
+      # Health-zone shapefile for the maps (BDBV2026-Data,
+      # data/shapefiles/DRC_Health_zones.*). Public repo: no token needed; the
+      # shapefile is in regular git (not LFS) in that repo.
+      - name: Checkout health-zone shapefile (BDBV2026-Data)
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Data
+          path: BDBV2026-Data
+          sparse-checkout: |
+            data/shapefiles/DRC_Health_zones.shp
+            data/shapefiles/DRC_Health_zones.shx
+            data/shapefiles/DRC_Health_zones.dbf
+            data/shapefiles/DRC_Health_zones.prj
+            data/shapefiles/DRC_Health_zones.cpg
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        working-directory: dashboard
+        run: |
+          pip install -r requirements.txt
+          python -m pytest -q tests/
+
+      - name: Build dashboard HTML
+        working-directory: dashboard
+        env:
+          BUILD_DIR: ${{ github.workspace }}/BDBV2026-Provincial_Reports/build
+          EXTRACTION_DIR: ${{ github.workspace }}/BDBV2026-Provincial_Reports/data/presentations
+          QA_LOG: ${{ github.workspace }}/BDBV2026-Provincial_Reports/qa/qa_log.csv
+          GEO_SOURCE: ${{ github.workspace }}/BDBV2026-Data/data/shapefiles/DRC_Health_zones.shp
+          DATA_ROOT: ${{ github.workspace }}/dashboard/Data
+        run: |
+          set -euo pipefail
+          python Scripts/build_dashboard.py
+          # output/ holds the versioned build artefacts; GitHub Pages serves the
+          # repo-root copies (same layout as the epidemic dashboard).
+          # every page, including one province-<slug>.html per province;
+          # province pages that disappeared from the data are removed too
+          rm -f province-*.html
+          cp output/*.html .
+          rm -rf assets
+          cp -r output/assets assets
+
+      - name: Commit and push
+        working-directory: dashboard
+        env:
+          DATA_REF: ${{ steps.refs.outputs.data_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A output/ ./*.html assets/
+          if git diff --cached --quiet; then
+            echo "No HTML changes to commit."
+            exit 0
+          fi
+          git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF}"
+          # This job and pr-preview.yml can push to main at the same time; they
+          # never touch the same paths, so rebase + retry cannot conflict.
+          branch="${{ steps.refs.outputs.dashboard_ref }}"
+          attempts=5
+          for attempt in $(seq 1 "${attempts}"); do
+            if git push origin "HEAD:${branch}"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            if [ "${attempt}" -eq "${attempts}" ]; then
+              echo "::error::push to ${branch} failed after ${attempts} attempts"
+              exit 1
+            fi
+            echo "Push rejected (attempt ${attempt}); rebasing onto origin/${branch} and retrying..."
+            git pull --rebase origin "${branch}" || { git rebase --abort 2>/dev/null || true; echo "::error::rebase onto origin/${branch} failed"; exit 1; }
+          done

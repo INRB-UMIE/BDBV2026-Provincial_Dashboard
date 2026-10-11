@@ -1,0 +1,336 @@
+{
+ "date": "30/09/2026",
+ "date_veille": "29/09/2026",
+ "version": 3,
+ "piliers": {
+  "coordination": "Coordination / synthèse",
+  "pec": "Prise en charge"
+ },
+ "sections": {
+  "points_saillants": "Points saillants",
+  "defis": "Défis / décisions / besoins"
+ },
+ "presentations": [
+  {
+   "province": "Tshopo",
+   "fichier": "TSHOPO.pptx",
+   "date_garde": "30/09/2026",
+   "nb_diapositives": 3,
+   "methodes": [
+    "python_pptx",
+    "xml",
+    "libreoffice_pdf"
+   ],
+   "indicateurs_cles": {
+    "cumul_confirmes": {
+     "valeur": "45",
+     "num": 45.0,
+     "den": null,
+     "diapositive": 2,
+     "source": "carte",
+     "etiquette": "Cumul cas/décès",
+     "libelle": "Cumul des cas confirmés"
+    },
+    "cas_jour": {
+     "valeur": "0",
+     "num": 0.0,
+     "den": null,
+     "diapositive": 2,
+     "source": "carte",
+     "etiquette": "Cas confirmés du jour",
+     "libelle": "Cas confirmés du jour"
+    }
+   },
+   "controles": [
+    {
+     "niveau": "erreur",
+     "controle": "somme",
+     "detail": "« POSITIFS INITIAUX » = 45, mais 37 vivants + 17 décès = 54. </script>",
+     "diapositive": 3
+    }
+   ],
+   "fiabilite": {
+    "score": 95,
+    "niveau": "élevée",
+    "methodes": [
+     "python-pptx",
+     "XML direct",
+     "LibreOffice + PDF"
+    ],
+    "elements_confirmes_pct": 98.4,
+    "accord_texte_pct": 96.9,
+    "couverture_pct": 100.0,
+    "coherence_pct": 75.0,
+    "diapositives_image": [],
+    "piliers_incertains": [],
+    "diapositives_lues_ocr": [
+     4
+    ],
+    "confirmation_ocr_pct": 88.0
+   },
+   "diapositives": [
+    {
+     "numero": 1,
+     "type": "garde",
+     "pilier": null,
+     "titre": "",
+     "indicateurs": [],
+     "sections": {},
+     "autres": [],
+     "tableaux": []
+    },
+    {
+     "numero": 2,
+     "type": "contenu",
+     "pilier": "coordination",
+     "pilier_libelle": "Coordination / synthèse",
+     "pilier_confiance": 0.8,
+     "titre": "1. SYNTHÈSE",
+     "indicateurs": [
+      {
+       "indicateur": "Cumul cas/décès",
+       "valeur": "45/18",
+       "detail": "létalité 40 %",
+       "confirmations": 3
+      }
+     ],
+     "sections": {
+      "points_saillants": [
+       "Confirmation du 45e cas"
+      ],
+      "defis": []
+     },
+     "confirmations": {
+      "points_saillants": [
+       3
+      ],
+      "defis": []
+     },
+     "autres": [],
+     "tableaux": []
+    },
+    {
+     "numero": 3,
+     "type": "contenu",
+     "pilier": "pec",
+     "pilier_libelle": "Prise en charge",
+     "pilier_confiance": 0.3,
+     "titre": "6. PRISE EN CHARGE",
+     "indicateurs": [],
+     "sections": {
+      "defis": [
+       "Faible capacité d'accueil"
+      ]
+     },
+     "confirmations": {
+      "defis": [
+       1
+      ]
+     },
+     "autres": [],
+     "tableaux": []
+    },
+    {
+     "numero": 4,
+     "type": "contenu",
+     "pilier": "surveillance",
+     "pilier_libelle": "Surveillance",
+     "titre": "2. SURVEILLANCE",
+     "indicateurs": [],
+     "sections": {
+      "points_saillants": [
+       "Total 344 cas confirmés lus sur une capture"
+      ],
+      "realisations": [],
+      "defis": [],
+      "planification": [],
+      "recommandations": []
+     },
+     "autres": [],
+     "tableaux": [],
+     "image_seulement": true,
+     "lu_par_ocr": true,
+     "ocr_items": [
+      "Total 344 cas confirmés lus sur une capture"
+     ],
+     "confirmations": {
+      "points_saillants": [
+       1
+      ]
+     },
+     "pilier_confiance": 0.9
+    }
+   ],
+   "kpi_piliers": {
+    "surveillance": {
+     "alertes_total": {
+      "n": 151,
+      "d": null,
+      "pct": null,
+      "valeur": "151",
+      "diapo": 6,
+      "src": "tableau",
+      "lib": "ligne « Total » du tableau des alertes",
+      "conf": 3
+     },
+     "alertes_verifiees": {
+      "n": 151,
+      "d": null,
+      "pct": null,
+      "valeur": "151",
+      "diapo": 6,
+      "src": "tableau",
+      "lib": "ligne « Total » du tableau des alertes",
+      "conf": 3
+     },
+     "taux_verification": {
+      "n": 151,
+      "d": 151,
+      "pct": 100.0,
+      "valeur": "151/151",
+      "diapo": 6,
+      "src": "calcul",
+      "lib": "vérifiées / alertes du jour",
+      "conf": 3
+     }
+    },
+    "laboratoire": {
+     "echantillons_recus": {
+      "n": 14,
+      "d": null,
+      "pct": null,
+      "valeur": "14",
+      "diapo": 9,
+      "src": "carte",
+      "lib": "ÉCHANTILLONS",
+      "conf": 4
+     },
+     "positifs": {
+      "n": 2,
+      "d": null,
+      "pct": null,
+      "valeur": "2",
+      "diapo": 9,
+      "src": "carte",
+      "lib": "POSITIFS",
+      "conf": 4
+     }
+    },
+    "pci": {}
+   }
+  }
+ ],
+ "kpi_definitions": {
+  "surveillance": [
+   {
+    "cle": "alertes_total",
+    "libelle": "Alertes du jour",
+    "unite": ""
+   },
+   {
+    "cle": "alertes_nouvelles",
+    "libelle": "Nouvelles alertes",
+    "unite": ""
+   },
+   {
+    "cle": "alertes_verifiees",
+    "libelle": "Alertes vérifiées / investiguées",
+    "unite": ""
+   },
+   {
+    "cle": "taux_verification",
+    "libelle": "Taux de vérification des alertes",
+    "unite": "%"
+   },
+   {
+    "cle": "alertes_validees",
+    "libelle": "Alertes validées (cas suspects)",
+    "unite": ""
+   },
+   {
+    "cle": "taux_validation",
+    "libelle": "Alertes validées / vérifiées",
+    "unite": "%"
+   },
+   {
+    "cle": "suspects_transferes",
+    "libelle": "Suspects transférés au CTE/CT",
+    "unite": ""
+   },
+   {
+    "cle": "taux_transfert",
+    "libelle": "Suspects validés transférés",
+    "unite": "%"
+   },
+   {
+    "cle": "part_recherche_active",
+    "libelle": "Alertes issues de la recherche active",
+    "unite": "%"
+   },
+   {
+    "cle": "completude",
+    "libelle": "Complétude des rapports",
+    "unite": "%"
+   }
+  ],
+  "laboratoire": [
+   {
+    "cle": "echantillons_recus",
+    "libelle": "Échantillons reçus",
+    "unite": ""
+   },
+   {
+    "cle": "echantillons_testes",
+    "libelle": "Échantillons analysés",
+    "unite": ""
+   },
+   {
+    "cle": "echantillons_en_cours",
+    "libelle": "Échantillons en cours d'analyse",
+    "unite": ""
+   },
+   {
+    "cle": "taux_analyse",
+    "libelle": "Échantillons analysés / reçus",
+    "unite": "%"
+   },
+   {
+    "cle": "positifs",
+    "libelle": "Échantillons positifs",
+    "unite": ""
+   },
+   {
+    "cle": "taux_positivite",
+    "libelle": "Taux de positivité",
+    "unite": "%"
+   }
+  ],
+  "pci": [
+   {
+    "cle": "rings",
+    "libelle": "Rings ouverts",
+    "unite": "%"
+   },
+   {
+    "cle": "ess_decont",
+    "libelle": "ESS / FOSA décontaminées",
+    "unite": "%"
+   },
+   {
+    "cle": "menages_decont",
+    "libelle": "Ménages décontaminés",
+    "unite": "%"
+   },
+   {
+    "cle": "menages_dotes",
+    "libelle": "Ménages dotés en kits",
+    "unite": "%"
+   },
+   {
+    "cle": "ppl_infectes",
+    "libelle": "Prestataires (PPL) infectés",
+    "unite": ""
+   }
+  ]
+ }
+}

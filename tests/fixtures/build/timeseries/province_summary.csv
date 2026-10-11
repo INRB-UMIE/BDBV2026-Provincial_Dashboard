@@ -1,0 +1,4 @@
+date,province,presentation_recue,cumul_confirmes,cumul_deces,letalite_pct,confirmes_21j,deces_21j,zs_affectees,zs_actives_21j,nouvelles_alertes,total_alertes,alertes_validees,contacts_a_suivre,contacts_vus,taux_suivi_pct,contacts_devenus_suspects,tables_extraites,tables_manquantes
+2026-09-29,Tshopo,True,44,18,40.9,30,10,7,4,120,150,10,700,600,85.7,0,alert_sources_wide;alerts;cases;contacts,
+2026-09-30,Tshopo,True,45,18,40.0,32,11,7,4,128,151,12,762,638,83.7,0,alert_sources_wide;alerts;cases;contacts,
+2026-09-30,Haut-Uele,True,,,,,,,,,,,,,,,,alerts;cases;contacts

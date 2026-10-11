@@ -1,0 +1,3 @@
+date,province,zone,label_original,zone_resolved,confirmes_21j,deces_21j,letalite_21j,date_dernier_cas,jours_depuis_dernier_cas,population,taux_attaque_100k,letalite,cumul_deces,cumul_confirmes
+2026-09-30,Tshopo,Makiso Kisangani,2.Makiso- Kis,True,17,6,35.0,2026-09-28,1,,,45.0,10,22
+2026-09-30,Tshopo,Kabondo,3.Kabondo,True,0,0,0.0,2026-09-18,12,,,17.0,1,6

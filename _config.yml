@@ -1,0 +1,6 @@
+# GitHub Pages (Jekyll) config — same as BDBV2026-Epidemic_Dashboard.
+# Pages serves the repo-root copies; output/ is the versioned build artefact.
+exclude:
+  - output
+  - Scripts
+  - tests

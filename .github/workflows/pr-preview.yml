@@ -1,0 +1,120 @@
+# Build the dashboard from a pull request and deploy a static preview under
+# pr-preview/pr-<number>/ on main (the branch GitHub Pages serves).
+# Same mechanism as BDBV2026-Epidemic_Dashboard/.github/workflows/pr-preview.yml.
+#
+# Pages settings: deploy from the main branch at repository root.
+# Preview URL: https://<owner>.github.io/<repo>/pr-preview/pr-<number>/
+# Fork PRs are skipped (pr-preview-action v1 does not support them).
+
+name: Deploy PR preview
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    paths:
+      - "Scripts/**"
+      - "Data/**"
+      - "requirements.txt"
+      - ".github/workflows/pr-preview.yml"
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DATA_REPO: INRB-UMIE/BDBV2026-Provincial_Reports
+
+jobs:
+  deploy-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve data ref
+        if: github.event.action != 'closed'
+        id: refs
+        env:
+          GH_TOKEN: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if release_json="$(gh release view --repo "${DATA_REPO}" --json targetCommitish,tagName 2>/dev/null)"; then
+            data_ref="$(jq -r '.targetCommitish' <<< "${release_json}")"
+            echo "Using latest ${DATA_REPO} release $(jq -r '.tagName' <<< "${release_json}") @ ${data_ref}" >&2
+          else
+            echo "::warning::No GitHub release found on ${DATA_REPO}; falling back to main." >&2
+            data_ref="main"
+          fi
+          echo "data_ref=${data_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pull request
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout repository for preview cleanup
+        if: github.event.action == 'closed'
+        uses: actions/checkout@v4
+
+      - name: Checkout data repo
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          ref: ${{ steps.refs.outputs.data_ref }}
+          path: BDBV2026-Provincial_Reports
+          token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+          sparse-checkout: |
+            build
+            qa
+            data/presentations
+
+      # Health-zone shapefile for the maps (BDBV2026-Data,
+      # data/shapefiles/DRC_Health_zones.*). Public repo: no token needed; the
+      # shapefile is in regular git (not LFS) in that repo.
+      - name: Checkout health-zone shapefile (BDBV2026-Data)
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Data
+          path: BDBV2026-Data
+          sparse-checkout: |
+            data/shapefiles/DRC_Health_zones.shp
+            data/shapefiles/DRC_Health_zones.shx
+            data/shapefiles/DRC_Health_zones.dbf
+            data/shapefiles/DRC_Health_zones.prj
+            data/shapefiles/DRC_Health_zones.cpg
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        if: github.event.action != 'closed'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build dashboard HTML
+        if: github.event.action != 'closed'
+        env:
+          BUILD_DIR: ${{ github.workspace }}/BDBV2026-Provincial_Reports/build
+          EXTRACTION_DIR: ${{ github.workspace }}/BDBV2026-Provincial_Reports/data/presentations
+          QA_LOG: ${{ github.workspace }}/BDBV2026-Provincial_Reports/qa/qa_log.csv
+          GEO_SOURCE: ${{ github.workspace }}/BDBV2026-Data/data/shapefiles/DRC_Health_zones.shp
+          DATA_ROOT: ${{ github.workspace }}/Data
+        run: |
+          set -euo pipefail
+          python Scripts/build_dashboard.py
+          rm -rf preview-site && mkdir -p preview-site
+          cp output/*.html preview-site/
+          cp -r output/assets preview-site/
+
+      - name: Deploy preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ${{ github.event.action != 'closed' && './preview-site/' || '.' }}
+          preview-branch: main
+          umbrella-dir: pr-preview
+          qr-code: true
+          wait-for-pages-deployment: true
