@@ -33,6 +33,37 @@ def _logo_tag() -> str:
             f'alt="INRB, INSP, UMIE, INOHA, Africa CDC, OMS">')
 
 
+def _semaines_province(semaines: dict, province: str) -> dict:
+    """Semaines réduites à une province (page province : encadré « Priorités de la semaine »)."""
+    out = {}
+    for cle, s in semaines.items():
+        out[cle] = {
+            "lundi": s["lundi"], "dimanche": s["dimanche"], "jours": s["jours"],
+            "provinces": {province: s["provinces"][province]} if province in s.get("provinces", {}) else {},
+            "signaux": [x for x in s.get("signaux", []) if x["province"] == province],
+            "bonnes_nouvelles": [x for x in s.get("bonnes_nouvelles", []) if x["province"] == province],
+            "points": [x for x in s.get("points", []) if province in x["provinces"]][:8],
+            "alertes_zs": [x for x in s.get("alertes_zs", []) if x["province"] == province],
+        }
+    return out
+
+
+def _province_menu(meta: dict, current: str | None) -> str:
+    """Menu « Provinces » de la barre de navigation : ouvre la page de la province choisie (date conservée)."""
+    pages = meta.get("province_pages") or {}
+    if not pages:
+        return ""
+    opts = "".join(
+        f'<option value="{html.escape(fname)}"{" selected" if prov == current else ""}>{html.escape(prov)}</option>'
+        for prov, fname in sorted(pages.items())
+    )
+    premier = ('<option value="synthese.html">Toutes les provinces</option>' if current
+               else '<option value="" selected disabled>Choisir…</option>')
+    cls = "province-menu active" if current else "province-menu"
+    return (f'<div class="{cls}"><label for="province-nav">Provinces</label>'
+            f'<select id="province-nav" aria-label="Résumé par province">{premier}{opts}</select></div>')
+
+
 def render_page(view_id: str, title: str, body: str, payload: dict, province: str | None = None,
                 with_map: bool = False) -> str:
     meta = payload.get("meta", {})
@@ -43,6 +74,10 @@ def render_page(view_id: str, title: str, body: str, payload: dict, province: st
         page_payload = {**payload, "extraction": [r for r in payload.get("extraction", []) if r.get("province") == province]}
     else:
         page_payload = {**payload, "extraction": []}
+    if province:                                  # encadré de priorités : la part de la province seulement
+        page_payload = {**page_payload, "semaines": _semaines_province(payload.get("semaines") or {}, province)}
+    elif view_id not in ("week", "kpis"):         # priorités : seulement là où elles s'affichent
+        page_payload = {k: v for k, v in page_payload.items() if k != "semaines"}
     tab_links = []
     for vid, label in TABS:
         active = vid == view_id
@@ -90,17 +125,21 @@ def render_page(view_id: str, title: str, body: str, payload: dict, province: st
 <nav class="tabs" aria-label="Pages du tableau de bord">
 {tabs}
 <div class="nav-controls">
+  {_province_menu(meta, province)}
   <div class="date-picker">
-    <label for="date-select">Date du rapport</label>
-    <select id="date-select" aria-label="Date du rapport"></select>
+    <label for="date-select" title="Date des investigations : chaque présentation porte sur la veille">Date des données</label>
+    <select id="date-select" aria-label="Date des données (veille de la présentation)"></select>
   </div>
 </div>
 </nav>
 <main id="main">
+<div id="zs-alert" class="zs-alert" role="alert" hidden></div>
 <h2 class="page-title">{html.escape(title)}</h2>
 {body}
 </main>
 <footer class="site-footer">
+  <p><strong>Dates :</strong> chaque date est celle des données ; elles sont présentées par les DPS le lendemain
+  (le dossier PRESENTATION_29092026 contient les investigations du 28/09).</p>
   <p><strong>Données préliminaires et confidentielles.</strong> Chiffres tels que présentés par les DPS, sans correction ;
   les incohérences repérées sont listées dans « Qualité des données ». Ne pas diffuser.</p>
   <p class="build-info">Source : <code>{repo}</code>{f" @ <code>{commit}</code>" if commit else ""}{f" · build des données {built} UTC" if built else ""}

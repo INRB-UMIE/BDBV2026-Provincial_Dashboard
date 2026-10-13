@@ -67,6 +67,12 @@
     return f ? `<a class="prov-link" href="${withDate(f)}">${esc(prov)}</a>` : esc(prov);
   };
 
+  function initProvinceMenu() {
+    const sel = document.getElementById("province-nav");
+    if (!sel) return;
+    sel.addEventListener("change", () => { if (sel.value) location.href = withDate(sel.value); });
+  }
+
   function initDateSelect() {
     const sel = document.getElementById("date-select");
     if (!sel) return;
@@ -599,6 +605,8 @@
   const STATUS_LABELS = { active: "Active (dernier cas ≤ 21 j)", watch: "Surveillance (22–42 j)", clear: "Sans cas depuis > 42 j" };
 
   let LMAP = null; // the page's map instance (one per page)
+  let ZSI = {};    // zones signalées (nouvelles / réactivées sur 21 j) à la date affichée, recalculé à chaque rendu
+  const ZS_LINE = "#6a1b9a";
 
   function mapData() {
     const byZone = (rows) => Object.fromEntries(rows.filter((r) => r.zone).map((r) => [r.zone, r]));
@@ -740,8 +748,9 @@
       if (z.state === "none") st = { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0, dashArray: null };
       else if (z.state === "notextracted" || z.state === "notreported") st = { color: "#555", weight: zoomWeight(0.6), dashArray: "3 3", fillColor: ZERO_FILL, fillOpacity: 0.12 };
       else if (z.state === "zero") st = { color: "#111", weight: zoomWeight(0.35), dashArray: null, fillColor: ZERO_FILL, fillOpacity: 0.48 };
-      else if (z.state === "cat") st = { color: "#111", weight: zoomWeight(0.35), dashArray: null, fillColor: STATUS_HEX[z.key], fillOpacity: 0.72 };
+      else if (z.state === "cat") st = { color: "#111", weight: zoomWeight(0.35), dashArray: null, fillColor: layer.cats ? layer.cats[z.key][0] : STATUS_HEX[z.key], fillOpacity: 0.72 };
       else st = { color: "#111", weight: zoomWeight(0.35), dashArray: null, fillColor: colorFor(z.v, layer), fillOpacity: layer.palette === OUTBREAK ? 0.72 : 0.85 };
+      if (zsDe(ZSI, prov, nom)) Object.assign(st, { color: ZS_LINE, weight: Math.max(2.6, zoomWeight(1.2)), dashArray: null, opacity: 1 });
       if (nom === selected) Object.assign(st, { color: "#1a1a1a", weight: 2.4, dashArray: null });
       return st;
     }
@@ -753,8 +762,10 @@
       const z = zoneValue(layer, nom, prov, D);
       const body = z.state === "value" ? `${esc(layer.label)} : ${fmtVal(z.v, layer)}`
         : z.state === "zero" ? esc(z.why || layer.zero || "0")
-        : z.state === "cat" ? esc(STATUS_LABELS[z.key]) : esc(z.why);
-      return `<strong>${esc(nom)}</strong> <span class="tt-prov">${esc(prov)}</span><br/>${body}`;
+        : z.state === "cat" ? esc(layer.cats ? layer.cats[z.key][1] : STATUS_LABELS[z.key]) : esc(z.why);
+      const sz = zsDe(ZSI, prov, nom);
+      return `<strong>${esc(nom)}</strong> <span class="tt-prov">${esc(prov)}</span><br/>${body}`
+        + (sz ? `<br/><span class="tt-zs">⚠ ${esc(ZS_TYPES[sz.type])} le ${esc(shortDate(sz.date))}</span>` : "");
     }
 
     function infoHTML(nom, prov) {
@@ -939,8 +950,9 @@
       const gray = [];
       if (layer.categorical) {
         q(".legend-bar").style.display = q(".legend-ticks").style.display = q(".legend-scale").style.display = "none";
-        q(".legend-cats").innerHTML = Object.keys(STATUS_HEX).map((k) => `<div><span class="swatch" style="background:${STATUS_HEX[k]}"></span>${esc(STATUS_LABELS[k])}</div>`).join("");
-        gray.push(`<span class="swatch" style="background:${ZERO_FILL}"></span>Aucun cas rapporté`);
+        const cats = layer.cats || Object.fromEntries(Object.keys(STATUS_HEX).map((k) => [k, [STATUS_HEX[k], STATUS_LABELS[k]]]));
+        q(".legend-cats").innerHTML = Object.values(cats).map(([c, l]) => `<div><span class="swatch" style="background:${c}"></span>${esc(l)}</div>`).join("");
+        gray.push(`<span class="swatch" style="background:${ZERO_FILL}"></span>${layer.cats ? "Zone non touchée" : "Aucun cas rapporté"}`);
       } else {
         q(".legend-bar").style.display = q(".legend-ticks").style.display = q(".legend-scale").style.display = "";
         q(".legend-cats").innerHTML = "";
@@ -952,6 +964,7 @@
         q(".legend-scale").textContent = domain.isLog ? "(échelle logarithmique)" : "(échelle linéaire)";
         if (!layer.domain) gray.push(`<span class="swatch" style="background:${ZERO_FILL}"></span>${esc(layer.zero || "0")}`);
       }
+      if (Object.keys(ZSI).length) gray.unshift(`<span class="swatch" style="background:transparent;border:2.5px solid ${ZS_LINE}"></span>Nouvelle ZS ou ZS réactivée (21 j)`);
       gray.push('<span class="swatch swatch-dashed"></span>Non extrait / non rapporté');
       gray.push('<span class="swatch swatch-no-data"></span>Présentation non reçue');
       q(".legend-gray").innerHTML = gray.join(" · ");
@@ -1033,7 +1046,7 @@
     const conf = sum(rows, "cumul_confirmes"), dec = sum(rows, "cumul_deces");
     const aS = sum(rows, "contacts_a_suivre"), vus = sum(rows, "contacts_vus");
     const cell = (cls, v, label, sub) => `<div class="t-cell ${cls}"><div class="num">${v}</div><div class="lbl">${esc(label)}</div><div class="cov">${esc(sub)}</div></div>`;
-    el.innerHTML = `<div class="t-title">Présentations du ${esc(frDate(DATE))}</div><div class="t-row">`
+    el.innerHTML = `<div class="t-title" title="Chaque dossier PRESENTATION_JJMMAAAA contient les investigations de la veille">Données du ${esc(frDate(DATE))} · présentées le ${esc(frDate(addDays(DATE, 1)))}</div><div class="t-row">`
       + cell("cases", fmt(conf), "Confirmés (cumul)", `${n("cumul_confirmes")}/${rows.length} prov.`)
       + cell("deaths", fmt(dec), "Décès (cumul)", `létalité ${fmtPct(pct(dec, conf))}`)
       + cell("alerts", fmt(sum(rows, "nouvelles_alertes")), "Nouvelles alertes", `${n("nouvelles_alertes")}/${rows.length} prov.`)
@@ -1122,13 +1135,88 @@
     });
   }
 
+
+  // ── ZS touchées sans nouveau cas notifié : 21–42 jours (vigilance) et plus de 42 jours (sous contrôle) ──
+  // Critères OMS : 21 jours = durée maximale d'incubation ; 42 jours (2 × 21) sans nouveau cas = fin de transmission.
+  // Jours depuis le dernier cas : valeur déclarée par la DPS (comptée au jour de la présentation) ; à défaut, calculée
+  // depuis la date du dernier cas jusqu'au jour de la présentation (lendemain de la date des données).
+  /** ZS touchées : dernier tableau des cas de la province à la date affichée ou avant. */
+  function zonesTouchees(d, prov) {
+    const dates = [...new Set((P.cases || []).filter((r) => r.province === prov && r.date <= d).map((r) => r.date))].sort();
+    const der = dates[dates.length - 1];
+    if (!der) return [];
+    return (P.cases || []).filter((r) => r.date === der && r.province === prov && r.zone
+      && ((isNum(r.cumul_confirmes) && r.cumul_confirmes > 0) || (isNum(r.confirmes_21j) && r.confirmes_21j > 0)))
+      .map((r) => ({ ...r, tableau_du: der }));
+  }
+  function zsSansCas(d) {
+    const out = { lignes: [], nonEvaluables: {} };
+    const jourPres = addDays(d, 1);
+    (META.provinces || []).forEach((prov) => {
+      const touchees = zonesTouchees(d, prov);
+      if (!touchees.length) return;
+      let connus = 0;
+      touchees.forEach((z) => {
+        let j = isNum(z.jours_depuis_dernier_cas) ? z.jours_depuis_dernier_cas : null, src = "déclaré par la DPS";
+        if (j == null && z.date_dernier_cas) {
+          // le tableau peut dater d'un jour précédent : on compte jusqu'au jour de la présentation affichée
+          j = Math.round((Date.parse(jourPres) - Date.parse(z.date_dernier_cas)) / 864e5); src = "calculé";
+        } else if (j != null && z.tableau_du < d) {
+          j += Math.round((Date.parse(d) - Date.parse(z.tableau_du)) / 864e5); src = `déclaré le ${shortDate(addDays(z.tableau_du, 1))}, avancé à ce jour`;
+        }
+        if (j == null) return;
+        connus++;
+        out.lignes.push({ province: prov, zone: z.zone, jours: j, src, date_dernier_cas: z.date_dernier_cas, cumul: z.cumul_confirmes,
+          deces: z.cumul_deces, tableau_du: z.tableau_du, classe: j <= 21 ? "active" : j <= 42 ? "vig" : "ctrl" });
+      });
+      if (!connus) out.nonEvaluables[prov] = "le tableau des cas ne donne pas la date du dernier cas";
+    });
+    return out;
+  }
+  function sansCasHTML(prov) {
+    const classe = (document.querySelector(".seg-btn[data-sanscas][aria-pressed=\"true\"]") || {}).dataset?.sanscas || "vig";
+    const R = zsSansCas(DATE);
+    const toutes = R.lignes.filter((x) => !prov || x.province === prov);
+    const lignes = toutes.filter((x) => x.classe === classe).sort((a, b) => a.jours - b.jours || a.province.localeCompare(b.province, "fr"));
+    const n = (c) => toutes.filter((x) => x.classe === c).length;
+    const ne = Object.entries(R.nonEvaluables).filter(([p]) => !prov || p === prov);
+    const lib = classe === "vig" ? "sans nouveau cas depuis 21 à 42 jours (vigilance)" : "sans nouveau cas depuis plus de 42 jours (fin de transmission, critère OMS)";
+    const intro = `<p class="sil-resume"><strong>${lignes.length}</strong> ZS touchée(s) ${lib}, sur ${toutes.length} dont la date du dernier cas est connue `
+      + `<span class="muted">(${n("active")} active(s) ≤ 21 j · ${n("vig")} entre 21 et 42 j · ${n("ctrl")} au-delà de 42 j)</span>.`
+      + (ne.length ? ` <span class="muted">Non évaluable : ${ne.map(([p, w]) => `${esc(p)} (${esc(w)})`).join(", ")}.</span>` : "") + "</p>";
+    if (!lignes.length) return intro;
+    const reste = (x) => (x.classe === "vig" ? `${43 - x.jours} j avant les 42 j` : "");
+    return intro + `<div class="table-wrap"><table><thead><tr><th>Province</th><th>Zone de santé</th><th class="num">Jours sans cas</th>`
+      + `<th>Dernier cas</th>${classe === "vig" ? "<th>Fin de transmission</th>" : ""}<th class="num">Cumul confirmés</th><th class="num">Décès</th></tr></thead><tbody>`
+      + lignes.map((x) => `<tr><td>${provLink(x.province)}</td><td>${esc(x.zone)}</td>`
+        + `<td class="num" title="${esc(x.src)}">${x.classe === "vig" ? pill("warn", "!", `${fmt(x.jours)} j`) : pill("good", "✓", `${fmt(x.jours)} j`)}</td>`
+        + `<td>${x.date_dernier_cas ? esc(frDate(x.date_dernier_cas)) : '<span class="na">–</span>'}</td>`
+        + (classe === "vig" ? `<td class="muted">${esc(reste(x))}</td>` : "")
+        + `<td class="num">${fmt(x.cumul)}</td><td class="num">${fmt(x.deces)}</td></tr>`).join("")
+      + "</tbody></table></div>";
+  }
+  function renderSansCas(prov) {
+    const el = document.getElementById("zs-sans-cas");
+    if (!el) return;
+    document.querySelectorAll(".seg-btn[data-sanscas]").forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".seg-btn[data-sanscas]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        el.innerHTML = sansCasHTML(prov);
+      });
+    });
+    el.innerHTML = sansCasHTML(prov);
+  }
+
   let getZoneProvince = () => "";
   function zoneStatus(r) {
     const j = r.jours_depuis_dernier_cas;
-    if (!isNum(j)) return '<span class="na">–</span>';
-    if (j <= 21) return pill("crit", "●", "Active");
-    if (j <= 42) return pill("warn", "!", "Surveillance");
-    return pill("good", "✓", "Sans cas > 42 j");
+    const b = zsBadge(zsDe(ZSI, r.province, r.zone));
+    if (!isNum(j)) return b ? b.trim() : '<span class="na">–</span>';
+    if (j <= 21) return pill("crit", "●", "Active") + b;
+    if (j <= 42) return pill("warn", "!", "Surveillance") + b;
+    return pill("good", "✓", "Sans cas > 42 j") + b;
   }
   function renderZones() {
     const prov = getZoneProvince();
@@ -1142,6 +1230,7 @@
       label: zlabel(r), value: r.confirmes_21j,
       tip: [["Province", esc(r.province)], ["Confirmés 21 j", fmt(r.confirmes_21j)], ["Décès 21 j", fmt(r.deces_21j)], ["Dernier cas", frDate(r.date_dernier_cas)]],
     })), { empty: no21 ? "Le tableau des cas de cette province ne donne pas les confirmés sur 21 jours." : "Aucune zone avec des cas confirmés sur les 21 derniers jours.", aria: "Confirmés sur 21 jours par zone de santé" });
+    renderSansCas(prov);
     renderTable(document.getElementById("table-zones"), [
       { key: "zone", label: "Zone de santé", render: (r) => esc(r.zone) + (r.zone_resolved === false ? ' <span title="Nom non reconnu dans le référentiel des ZS">⚠</span>' : "") },
       { key: "province", label: "Province" },
@@ -1490,8 +1579,10 @@
       { key: "check", label: "Contrôle", render: (q) => esc(CHECK_LABELS[q.check] || q.check) },
       { key: "detail", label: "Détail", cls: "detail", sortable: false },
     ], qa, { sortKey: "status", desc: false, empty: "Aucun constat de la QA pour cette date." });
+    renderSansCas(prov);
     renderProvinceKpis(prov);
     renderProvincePillars(prov);
+    renderProvincePriorites(prov);
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1530,6 +1621,11 @@
     let msg = "";
     if (!d) msg = "Aucune extraction des présentations : lancer <code>extraire_rapports.py</code> dans <code>BDBV2026-Provincial_Reports/data/presentations</code>, puis reconstruire le dashboard.";
     else if (d !== DATE) msg = `Pas d'extraction des présentations pour le ${esc(frDate(DATE))} : affichage du ${esc(frDate(d))}, la date disponible la plus proche.`;
+    const ech = (P.extraction_echecs || []).filter((e) => e.date === (d || DATE));
+    if (ech.length) {
+      msg += (msg ? "<br>" : "") + `Données du ${esc(frDate(d || DATE))} (présentations du ${esc(frDate(addDays(d || DATE, 1)))}) manquantes ou illisibles : `
+        + ech.map((e) => `<strong>${esc(e.province)}</strong> (${esc(e.statut === "absente" ? "absente" : "échec de lecture")}${e.statut !== "absente" && e.raison ? ` : ${esc(e.raison)}` : ""})`).join(", ") + ".";
+    }
     el.innerHTML = msg;
     el.classList.toggle("show", !!msg);
   }
@@ -1575,7 +1671,10 @@
 
     hbarChart(document.getElementById("chart-fiabilite"), rows.slice().sort((a, b) => ((b.fiabilite || {}).score ?? -1) - ((a.fiabilite || {}).score ?? -1)).map((r) => {
       const f = r.fiabilite || {};
-      return { label: r.province, value: f.score, tip: [["Score", `${f.score}/100 (${f.niveau})`], ["Éléments confirmés", fmtPct(f.elements_confirmes_pct)], ["Accord du texte", fmtPct(f.accord_texte_pct)], ["Vu à l'écran (OCR)", isNum(f.confirmation_ocr_pct) ? fmtPct(f.confirmation_ocr_pct) : "sans OCR"], ["Couverture", fmtPct(f.couverture_pct)], ["Cohérence", fmtPct(f.coherence_pct)]] };
+      const tip = f.version >= 2
+        ? [["Score", `${f.score}/100 (${f.niveau})${f.plafond ? ` · plafond ${f.plafond}` : ""}`], ["Chiffres près de leur étiquette", fmtPct(f.etiquette_pct)], ["Concordance des sources", `${fmtPct(f.concordance_pct)} (${f.nb_controles || 0} contrôle(s))`], ["Visibles à l'écran (OCR)", isNum(f.visible_ocr_pct) ? fmtPct(f.visible_ocr_pct) : "sans OCR"], ["Couverture", fmtPct(f.couverture_pct)], ["Lecture", fmtPct(f.lecture_pct)]]
+        : [["Score", `${f.score}/100 (${f.niveau}) — ancien calcul, relancer l'extraction`]];
+      return { label: r.province, value: f.score, tip };
     }), { max: 100, format: (v) => `${fmt(v)}/100`, empty: "Aucune extraction.", aria: "Fiabilité de l'extraction par province" });
 
     const ctrls = rows.flatMap((r) => (r.controles || []).map((c) => ({ ...c, province: r.province })));
@@ -1589,15 +1688,35 @@
     renderTable(document.getElementById("table-fiabilite"), [
       { key: "province", label: "Province", render: (r) => provLink(r.province) },
       { key: "score", label: "Score", num: true, sortValue: (r) => (r.fiabilite || {}).score, render: (r) => fiabPill(r.fiabilite) },
-      { key: "el", label: "Éléments confirmés", num: true, sortValue: (r) => (r.fiabilite || {}).elements_confirmes_pct, render: (r) => fmtPct((r.fiabilite || {}).elements_confirmes_pct) },
-      { key: "ac", label: "Accord du texte", num: true, sortValue: (r) => (r.fiabilite || {}).accord_texte_pct, render: (r) => fmtPct((r.fiabilite || {}).accord_texte_pct) },
-      { key: "oc", label: "Vu à l'écran (OCR)", num: true, sortValue: (r) => (r.fiabilite || {}).confirmation_ocr_pct, render: (r) => fmtPct((r.fiabilite || {}).confirmation_ocr_pct) },
+      { key: "et", label: "Près de l'étiquette", num: true, sortValue: (r) => (r.fiabilite || {}).etiquette_pct, render: (r) => fmtPct((r.fiabilite || {}).etiquette_pct) },
+      { key: "cc", label: "Concordance des sources", num: true, sortValue: (r) => (r.fiabilite || {}).concordance_pct, render: (r) => { const f = r.fiabilite || {}; return fmtPct(f.concordance_pct) + (f.nb_controles ? ` <span class="muted">(${f.nb_controles})</span>` : ""); } },
+      { key: "vi", label: "Visibles à l'écran (OCR)", num: true, sortValue: (r) => (r.fiabilite || {}).visible_ocr_pct, render: (r) => fmtPct((r.fiabilite || {}).visible_ocr_pct) },
       { key: "co", label: "Couverture", num: true, sortValue: (r) => (r.fiabilite || {}).couverture_pct, render: (r) => fmtPct((r.fiabilite || {}).couverture_pct) },
-      { key: "ch", label: "Cohérence", num: true, sortValue: (r) => (r.fiabilite || {}).coherence_pct, render: (r) => fmtPct((r.fiabilite || {}).coherence_pct) },
+      { key: "le", label: "Lecture", num: true, sortValue: (r) => (r.fiabilite || {}).lecture_pct, render: (r) => fmtPct((r.fiabilite || {}).lecture_pct) },
       { key: "me", label: "Méthodes", sortable: false, render: (r) => esc(((r.fiabilite || {}).methodes || []).join(" · ")) },
       { key: "img", label: "Diapos en image", sortable: false, render: (r) => { const f = r.fiabilite || {}, o = f.diapositives_lues_ocr || []; return esc((f.diapositives_image || []).join(", ") || "–") + (o.length ? ` <span class="muted">(lues par OCR : ${esc(o.join(", "))})</span>` : ""); } },
       { key: "inc", label: "Piliers incertains", sortable: false, render: (r) => esc(((r.fiabilite || {}).piliers_incertains || []).join(", ") || "–") },
     ], rows, { sortKey: "score", empty: "Aucune extraction." });
+
+    // à vérifier dans les PowerPoint : texte invisible, chiffres absents de l'écran ou loin de leur étiquette,
+    // sources discordantes, présentations absentes ou illisibles
+    const av = [];
+    (P.extraction_echecs || []).filter((e) => e.date === d).forEach((e) => av.push({ province: e.province, type: e.statut === "absente" ? "Présentation absente" : "Échec de lecture", diapo: null, quoi: e.fichier || "", detail: e.raison, ordre: 0 }));
+    rows.forEach((r) => {
+      const f = r.fiabilite || {};
+      if (r.note_fichier) av.push({ province: r.province, type: "Nom de fichier", diapo: null, quoi: r.fichier, detail: r.note_fichier, ordre: 1 });
+      (f.controles_croises || []).filter((c) => !c.ok).forEach((c) => av.push({ province: r.province, type: "Sources discordantes", diapo: null, quoi: c.controle, detail: c.detail, ordre: 1 }));
+      (f.chiffres_invisibles_ocr || []).forEach((x) => av.push({ province: r.province, type: "Chiffre non vu par l'OCR", diapo: x.diapositive, quoi: `${x.indicateur} = ${x.valeur}`, detail: "lu dans le fichier, mais ni l'OCR de la page ni celui de la carte seule ne le retrouvent : vérifier qu'il est bien visible (ou mal lu par l'OCR)", ordre: 2 }));
+      (f.texte_invisible || []).forEach((x) => av.push({ province: r.province, type: "Texte invisible écarté", diapo: x.diapositive, quoi: x.texte, detail: x.raison, ordre: 3 }));
+      (f.chiffres_loin_etiquette || []).forEach((x) => av.push({ province: r.province, type: "Chiffre loin de son étiquette", diapo: x.diapositive, quoi: `${x.indicateur} = ${x.valeur}`, detail: "rapprochement étiquette / valeur non confirmé par le PDF ni l'OCR", ordre: 4 }));
+    });
+    renderTable(document.getElementById("table-averifier"), [
+      { key: "province", label: "Province", render: (x) => provLink(x.province) },
+      { key: "type", label: "Problème", sortValue: (x) => x.ordre },
+      { key: "diapo", label: "Diapo", num: true, fmt },
+      { key: "quoi", label: "Élément", cls: "detail", sortable: false },
+      { key: "detail", label: "Détail", cls: "detail", sortable: false },
+    ], av, { sortKey: "type", desc: false, empty: "Rien à vérifier pour cette date." });
 
     const pSel = document.getElementById("pillar-select"), sSel = document.getElementById("section-select");
     if (!pSel.dataset.bound) {
@@ -1659,7 +1778,7 @@
   // ════════════════════════════════════════════════════════════
   const KPI_PILIERS = ["surveillance", "laboratoire", "pci"];
   const KPI_NOMS = { surveillance: "Surveillance", laboratoire: "Laboratoire", pci: "PCI / WASH" };
-  const KPI_SRC = { tableau: "ligne Total d'un tableau", evolution: "tableau ou graphique d'évolution (colonne du jour)", carte: "carte d'indicateur", texte: "phrase", ocr: "OCR d'une diapositive en image", calcul: "calculé" };
+  const KPI_SRC = { pipeline: "tableau lu par le pipeline du dépôt (contrôlé par la QA)", tableau: "ligne Total d'un tableau", evolution: "tableau ou graphique d'évolution (colonne du jour)", carte: "carte d'indicateur", texte: "phrase", ocr: "OCR d'une diapositive en image", calcul: "calculé" };
   const kpiDefs = (pil) => ((EXT_LABELS.kpi || {})[pil] || []);
   const kpiOf = (r, pil, k) => ((r.kpi || {})[pil] || {})[k];
   const isRate = (pil, k) => /^taux_|^part_|^completude$/.test(k);
@@ -1683,7 +1802,8 @@
     const nm = (r.methodes || []).length || r.n_methodes || 0;
     const main = isRate(pil, k) && isNum(v.p) ? fmtPct(v.p) : isNum(v.d) ? `${fmt(v.n)}/${fmt(v.d)}` : fmt(v.n);
     const sub = isRate(pil, k) && isNum(v.d) ? `<span class="kpi-frac">${fmt(v.n)}/${fmt(v.d)}</span>` : (!isRate(pil, k) && isNum(v.p) ? `<span class="kpi-frac">${fmtPct(v.p)}</span>` : "");
-    const tip = `${v.l || ""} · diapositive ${v.s} · ${KPI_SRC[v.src] || v.src}${v.src !== "calcul" && v.c != null ? ` · retrouvé par ${v.c}/${nm} méthodes` : ""}`;
+    const tip = `${v.l || ""}${v.s ? ` · diapositive ${v.s}` : ""} · ${KPI_SRC[v.src] || v.src}${v.src !== "calcul" && v.c != null ? ` · lu à côté de son étiquette par ${v.c}/${nm} méthodes` : ""}`;
+    if (v.src === "pipeline") return `<span class="src-tip" title="${esc(tip)}">${main}</span>${sub} <span class="conf ok" title="Lu par le pipeline du dépôt (tableaux natifs) et contrôlé par la QA">QA</span>`;
     const ocr = v.src === "ocr" ? ' <span class="ocr-tag" title="Lu par OCR">OCR</span>' : "";
     return `<span class="src-tip" title="${esc(tip)}">${main}</span>${sub}${ocr}${v.src !== "calcul" ? " " + confBadge(v.c, nm) : ""}`;
   }
@@ -1796,6 +1916,21 @@
     return groupes;
   }
 
+  // mini-barres jour par jour (la valeur est au survol) : les KPI se lisent en forme, pas en tableau de chiffres
+  function sparkBars(vals, jours, opts = {}) {
+    const w = 18, gap = 4, h = 26;
+    const max = Math.max(1, ...vals.map((v) => (isNum(v) ? v : 0)));
+    const W = jours.length * (w + gap);
+    const bars = jours.map((j, i) => {
+      const v = vals[i];
+      const x = i * (w + gap);
+      if (!isNum(v)) return `<rect x="${x}" y="${h - 3}" width="${w}" height="3" rx="1" class="sb-na"><title>${esc(jourCourt(j))} : non rapporté</title></rect>`;
+      const bh = Math.max(v > 0 ? 3 : 1, (v / max) * (h - 2));
+      return `<rect x="${x}" y="${h - bh}" width="${w}" height="${bh}" rx="2" class="${opts.cls || "sb"}"><title>${esc(jourCourt(j))} : ${esc(opts.format ? opts.format(v) : fmt(v))}</title></rect>`;
+    }).join("");
+    return `<svg class="spark" viewBox="0 0 ${W} ${h}" width="${W}" height="${h}" role="img" aria-label="${esc(opts.aria || "")}">${bars}</svg>`;
+  }
+
   function weekKpiTable(rowsSem, jours, pil) {
     const defs = pil === "coordination" ? CLES_SEMAINE.map(([cle, libelle, type]) => ({ cle, libelle, type }))
       : kpiDefs(pil).map((x) => ({ ...x, type: isRate(pil, x.cle) ? "taux" : KPI_FLUX.has(x.cle) ? "flux" : "stock" }));
@@ -1806,98 +1941,161 @@
         if (!vs.length) return null;
         const n = vs.reduce((a, v) => a + v.n, 0);
         const avecD = vs.filter((v) => isNum(v.d));
-        return { n, nd: avecD.reduce((a, v) => a + v.n, 0), d: avecD.length ? avecD.reduce((a, v) => a + v.d, 0) : null, k: vs.length };
+        return { n, nd: avecD.reduce((a, v) => a + v.n, 0), d: avecD.length ? avecD.reduce((a, v) => a + v.d, 0) : null };
       });
       if (!parJour.some(Boolean)) return null;
       const presents = parJour.filter(Boolean);
-      let sem;
-      if (x.type === "flux") sem = { n: presents.reduce((a, v) => a + v.n, 0) };
-      else if (x.type === "taux") { const nd = presents.reduce((a, v) => a + (v.d != null ? v.nd : 0), 0), d = presents.reduce((a, v) => a + (v.d || 0), 0); sem = { n: nd, d, p: pct(nd, d) }; }
-      else { const der = presents[presents.length - 1], pre = presents[0]; sem = { ...der, delta: presents.length > 1 && x.type === "stock" ? der.n - pre.n : null }; }
-      return { x, parJour, sem };
+      let resume;
+      if (x.type === "flux") resume = `${fmt(presents.reduce((a, v) => a + v.n, 0))} sur la semaine`;
+      else if (x.type === "taux") { const nd = presents.reduce((a, v) => a + (v.d != null ? v.nd : 0), 0), d = presents.reduce((a, v) => a + (v.d || 0), 0); resume = d ? `${fmtPct(pct(nd, d))} sur la semaine` : "–"; }
+      else { const der = presents[presents.length - 1], pre = presents[0]; const dl = der.n - pre.n; resume = `${fmt(der.n)}${presents.length > 1 && dl ? ` (${dl > 0 ? "+" : ""}${fmt(dl)})` : ""}`; }
+      const vals = parJour.map((v) => (!v ? null : x.type === "taux" ? (isNum(v.d) && v.d > 0 ? pct(v.nd, v.d) : null) : v.n));
+      return `<div class="kpi-spark"><span class="ks-lab">${esc(x.libelle)}</span>${sparkBars(vals, jours, { format: x.type === "taux" ? fmtPct : fmt, aria: x.libelle })}<span class="ks-sum">${esc(resume)}</span></div>`;
     }).filter(Boolean);
     if (!lignes.length) return "";
-    const cell = (x, v) => {
-      if (!v) return '<td class="num"><span class="na">–</span></td>';
-      if (x.type === "taux") return `<td class="num">${isNum(v.d) && v.d > 0 ? fmtPct(pct(v.nd ?? v.n, v.d)) : "–"}<span class="kpi-frac">${isNum(v.d) ? `${fmt(v.nd ?? v.n)}/${fmt(v.d)}` : ""}</span></td>`;
-      return `<td class="num">${fmt(v.n)}${isNum(v.d) ? `<span class="kpi-frac">/${fmt(v.d)}</span>` : ""}</td>`;
-    };
-    const semCell = (x, v) => {
-      if (x.type === "taux") return `<td class="num week-col">${fmtPct(v.p)}<span class="kpi-frac">${fmt(v.n)}/${fmt(v.d)}</span></td>`;
-      if (x.type === "flux") return `<td class="num week-col">${fmt(v.n)}<span class="kpi-frac">total</span></td>`;
-      const dl = isNum(v.delta) && v.delta !== 0 ? `<span class="kpi-frac">${v.delta > 0 ? "+" : ""}${fmt(v.delta)} sur la semaine</span>` : `<span class="kpi-frac">dernier jour</span>`;
-      return `<td class="num week-col">${fmt(v.n)}${isNum(v.d) ? `<span class="kpi-frac">/${fmt(v.d)}</span>` : ""}${dl}</td>`;
-    };
-    return `<div class="table-wrap"><table class="week-kpi"><thead><tr><th scope="col">Indicateur</th>${jours.map((j) => `<th scope="col" class="num">${esc(jourCourt(j))}</th>`).join("")}<th scope="col" class="num week-col">Semaine</th></tr></thead><tbody>`
-      + lignes.map(({ x, parJour, sem }) => `<tr><th scope="row">${esc(x.libelle)}</th>${parJour.map((v) => cell(x, v)).join("")}${semCell(x, sem)}</tr>`).join("")
-      + "</tbody></table></div>";
+    return `<div class="kpi-sparks"><div class="ks-head"><span></span><span>${jours.map((j) => `<i>${esc(JOURS[isoDay(j)])}</i>`).join("")}</span><span></span></div>${lignes.join("")}</div>`;
+  }
+
+  const SEMAINES = P.semaines || {};
+  const PDEF = P.priorites_def || { indicateurs: [], themes: {}, reference: "" };
+  const NIV = { critique: ["crit", "✕", "Critique"], eleve: ["warn", "!", "Élevé"], modere: ["mod", "•", "Modéré"], info: ["neutral", "i", "Information"] };
+  const STAT = { ok: ["ok", "✓", "Cible atteinte"], attention: ["attention", "!", "À surveiller"], critique: ["critique", "✕", "Critique"], nd: ["nd", "–", "Non rapporté"] };
+
+  function semainePour(d) {
+    const ks = Object.keys(SEMAINES).sort();
+    if (!ks.length) return null;
+    const l = weekStart(d);
+    if (SEMAINES[l]) return l;
+    const avant = ks.filter((k) => k <= l);
+    return avant.length ? avant[avant.length - 1] : ks[0];
+  }
+  function allerA(semaineCle) {
+    const s = SEMAINES[semaineCle];
+    if (!s) return;
+    const sel = document.getElementById("date-select");
+    const cible = s.jours[s.jours.length - 1];
+    if (sel && [...sel.options].some((o) => o.value === cible)) { sel.value = cible; sel.dispatchEvent(new Event("change")); }
   }
 
   function renderWeek() {
-    const ds = extDates();
-    const ref = extDateFor(DATE);
-    extNote(document.getElementById("extraction-note"), ref);
-    const root = document.getElementById("week-pillars");
-    if (!ref) { root.innerHTML = ""; return; }
-    const lundi = weekStart(ref), dimanche = addDays(lundi, 6);
-    const jours = ds.filter((d) => d >= lundi && d <= dimanche);
-    const pSel = document.getElementById("week-province"), sSel = document.getElementById("week-section"), plSel = document.getElementById("week-pillar");
-    const tog = document.getElementById("week-toggle");
+    const ks = Object.keys(SEMAINES).sort();
+    const cle = semainePour(DATE);
+    extNote(document.getElementById("extraction-note"), cle ? DATE : null);
+    if (!cle) { document.getElementById("week-lecture").innerHTML = '<p class="empty">Aucune semaine extraite.</p>'; return; }
+    const S = SEMAINES[cle];
+    const i = ks.indexOf(cle);
+    const prev = document.getElementById("week-prev"), next = document.getElementById("week-next");
+    prev.disabled = i <= 0; next.disabled = i >= ks.length - 1;
+    if (!prev.dataset.bound) {
+      prev.dataset.bound = "1";
+      prev.addEventListener("click", () => { const k = Object.keys(SEMAINES).sort(); const j = k.indexOf(semainePour(DATE)); if (j > 0) allerA(k[j - 1]); });
+      next.addEventListener("click", () => { const k = Object.keys(SEMAINES).sort(); const j = k.indexOf(semainePour(DATE)); if (j < k.length - 1) allerA(k[j + 1]); });
+    }
+    document.getElementById("week-title").textContent = `Semaine du ${frDate(S.lundi)} au ${frDate(S.dimanche)}`;
+    initExport();
+    document.getElementById("week-sub").textContent = `${S.jours.length} jour(s) de données : ${S.jours.map(jourCourt).join(", ")} (présentées le lendemain)`;
+
+    // 1. lecture
+    document.getElementById("week-lecture").innerHTML = S.lecture.map((t) => `<p>${esc(t)}</p>`).join("");
+
+    // 2. priorités (cartes) + bonnes nouvelles
+    const carte = (g) => {
+      const [cls, ic, lab] = NIV[g.niveau];
+      return `<details class="prio ${cls}"><summary><span class="prio-niv"><span aria-hidden="true">${ic}</span> ${esc(lab)}</span>`
+        + `<span class="prio-titre">${esc(g.titre)}</span>`
+        + `<span class="prio-prov">${g.provinces.map((p) => `<span class="prov-tag">${esc(p)}</span>`).join(" ")}</span>`
+        + `<span class="prio-theme">${esc(g.theme)}</span></summary>`
+        + `<ul>${g.details.map((d) => `<li><strong>${esc(d.province)}</strong> — ${esc(d.texte)}</li>`).join("")}</ul>`
+        + (g.cible ? `<p class="prio-cible">Cible : ${esc(g.cible)}</p>` : "") + "</details>";
+    };
+    const prio = S.priorites || [];
+    document.getElementById("week-priorites").innerHTML = prio.length ? prio.map(carte).join("")
+      : '<p class="empty">Aucun écart aux cibles détecté cette semaine.</p>';
+    const bons = S.bonnes_nouvelles || [];
+    document.getElementById("week-bons").innerHTML = bons.length
+      ? `<h4><span aria-hidden="true">✓</span> Bonnes nouvelles</h4><ul>${bons.map((b) => `<li><strong>${esc(b.province)}</strong> — ${esc(b.titre)}${b.detail ? ` <span class="muted">(${esc(b.detail)})</span>` : ""}</li>`).join("")}</ul>` : "";
+
+    // 3. carte de chaleur : provinces × indicateurs, statut en couleur, chiffres au survol
+    const inds = PDEF.indicateurs;
+    const provs = Object.keys(S.provinces).filter((p) => S.provinces[p].recus);
+    document.getElementById("heat-sub").textContent = "Chaque case compare la semaine à la cible de la riposte. Survolez une case pour la valeur et la cible.";
+    document.getElementById("week-heatmap").innerHTML = `<table class="heat"><thead><tr><th scope="col">Province</th>`
+      + inds.map((d) => `<th scope="col" title="${esc("Cible : " + d.cible)}">${esc(d.libelle)}</th>`).join("") + "</tr></thead><tbody>"
+      + provs.map((p) => `<tr><th scope="row">${provLink(p)}</th>` + inds.map((d) => {
+        const x = S.provinces[p].indicateurs[d.id];
+        const st = x ? x.statut : "nd";
+        const [cls, ic, lab] = STAT[st];
+        const tip = x ? `${d.libelle} — ${x.texte}. Cible : ${d.cible}` : `${d.libelle} : non rapporté cette semaine`;
+        return `<td class="hc ${cls}" title="${esc(tip)}"><span aria-hidden="true">${ic}</span><span class="sr">${esc(lab)}</span></td>`;
+      }).join("") + "</tr>").join("") + "</tbody></table>";
+
+    // 4a. cas du jour : petits multiples sur les 3 dernières semaines
+    const fin = S.dimanche, debut = addDays(S.lundi, -14);
+    const joursAff = extDates().filter((d) => d >= debut && d <= fin);
+    const casEl = document.getElementById("week-cas");
+    const provCas = [...new Set(EXT.map((r) => r.province))].sort((a, b) => a.localeCompare(b, "fr"));
+    casEl.innerHTML = joursAff.length ? provCas.map((p) => {
+      const vals = joursAff.map((d) => { const r = EXT.find((x) => x.date === d && x.province === p); return r ? cleNum(r, "cas_jour") : null; });
+      const tot = vals.filter(isNum).reduce((a, b) => a + b, 0);
+      return `<div class="mc"><div class="mc-head"><span>${esc(p)}</span><span class="muted">${fmt(tot)} cas</span></div>${sparkBars(vals, joursAff, { cls: "sb-cas", aria: "Cas confirmés par jour, " + p })}</div>`;
+    }).join("") + `<p class="muted small">Du ${esc(frDate(joursAff[0]))} au ${esc(frDate(joursAff[joursAff.length - 1]))} · trait gris : présentation absente ou chiffre non lu.</p>`
+      : '<p class="empty">Aucune donnée.</p>';
+
+    // 4b. zones de santé 21 / 42 jours : barres empilées en couleurs de statut
+    const zsEl = document.getElementById("week-zs");
+    const lignesZs = provs.map((p) => ({ p, z: S.provinces[p].zs || {} })).filter(({ z }) => (z.active || []).length + (z.vigilance || []).length + (z.controlee || []).length);
+    const maxZ = Math.max(1, ...lignesZs.map(({ z }) => (z.active || []).length + (z.vigilance || []).length + (z.controlee || []).length));
+    zsEl.innerHTML = lignesZs.length ? `<div class="legend"><span><span class="sw" style="background:var(--critical)"></span>Active (≤ 21 j)</span><span><span class="sw" style="background:var(--warning)"></span>Vigilance (22–42 j)</span><span><span class="sw" style="background:var(--good)"></span>Sous contrôle (> 42 j)</span></div>`
+      + lignesZs.map(({ p, z }) => {
+        const seg = (k, cls, lab) => { const l = z[k] || []; return l.length ? `<span class="zs-seg ${cls}" style="flex:${l.length}" title="${esc(`${lab} : ${l.length} ZS — ${l.join(", ")}`)}"></span>` : ""; };
+        const n = (z.active || []).length + (z.vigilance || []).length + (z.controlee || []).length;
+        return `<div class="zs-row"><span class="zs-lab">${esc(p)}</span><span class="zs-bar" style="width:${Math.max(8, (100 * n) / maxZ)}%">${seg("active", "a", "Active")}${seg("vigilance", "v", "Vigilance")}${seg("controlee", "c", "Sous contrôle")}</span><span class="zs-n muted">${n} ZS</span></div>`;
+      }).join("") + '<p class="muted small">Seulement les provinces dont le tableau par zone de santé donne la date du dernier cas.</p>'
+      : '<p class="empty">Aucune zone de santé avec la date du dernier cas cette semaine.</p>';
+
+    // 5. points remontés, regroupés par thème
+    const pSel = document.getElementById("week-province");
     if (!pSel.dataset.bound) {
       pSel.dataset.bound = "1";
-      const provs = [...new Set(EXT.map((r) => r.province))].sort((a, b) => a.localeCompare(b, "fr"));
-      pSel.innerHTML = `<option value="">Toutes</option>` + provs.map((p) => `<option>${esc(p)}</option>`).join("");
+      pSel.innerHTML = `<option value="">Toutes</option>` + provCas.map((p) => `<option>${esc(p)}</option>`).join("");
+      pSel.addEventListener("change", renderWeek);
+    }
+    const pf = pSel.value;
+    const pts = (S.points || []).filter((x) => !pf || x.provinces.includes(pf));
+    const parTheme = {};
+    pts.forEach((x) => { (parTheme[x.theme] = parTheme[x.theme] || []).push(x); });
+    const ordre = Object.keys(parTheme).sort((a, b) => parTheme[b].reduce((s, x) => s + x.score, 0) - parTheme[a].reduce((s, x) => s + x.score, 0));
+    document.getElementById("week-points").innerHTML = ordre.length ? ordre.map((t) => {
+      const l = parTheme[t];
+      return `<section class="theme-card"><h4>${esc(PDEF.themes[t] || t)} <span class="count">${l.length}</span></h4><ul>`
+        + l.slice(0, 6).map((x) => `<li>${esc(x.texte)} <span class="pt-meta">${x.provinces.map((p) => `<span class="prov-tag">${esc(p)}</span>`).join(" ")}`
+          + `${x.jours > 1 ? ` <span class="rep${x.persistant ? " persist" : ""}" title="${esc("Repris le " + x.dates.map(jourCourt).join(", "))}">${x.persistant ? "persistant · " : ""}${x.jours} j.</span>` : ""}`
+          + ` <span class="sec-tag sec-${x.section}">${esc(SECTION_NAMES[x.section] || x.section)}</span></span></li>`).join("")
+        + (l.length > 6 ? `<li class="muted">+ ${l.length - 6} autre(s) dans le détail par pilier</li>` : "") + "</ul></section>";
+    }).join("") : '<p class="empty">Aucun point remonté pour cette sélection.</p>';
+    document.getElementById("week-ref").textContent = PDEF.reference;
+
+    // 6. détail par pilier (replié)
+    renderWeekPiliers(S.jours);
+  }
+
+  function renderWeekPiliers(jours) {
+    const root = document.getElementById("week-pillars");
+    const sSel = document.getElementById("week-section"), plSel = document.getElementById("week-pillar");
+    if (!sSel.dataset.bound) {
+      sSel.dataset.bound = "1";
       sSel.innerHTML = `<option value="">Toutes</option>` + Object.entries(SECTION_NAMES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
       plSel.innerHTML = `<option value="">Tous</option>` + pillarOrder().map((k) => `<option value="${esc(k)}">${esc(EXT_LABELS.piliers[k])}</option>`).join("");
-      [pSel, sSel, plSel].forEach((el) => el.addEventListener("change", renderWeek));
-      tog.addEventListener("click", () => {
-        const ouvrir = tog.getAttribute("aria-pressed") !== "true";
-        tog.setAttribute("aria-pressed", String(ouvrir));
-        tog.textContent = ouvrir ? "Tout replier" : "Tout déplier";
-        root.querySelectorAll("details.week-pillar").forEach((d) => { d.open = ouvrir; });
-      });
+      [sSel, plSel].forEach((el) => el.addEventListener("change", renderWeek));
     }
-    const prov = pSel.value, secF = sSel.value, pilF = plSel.value;
+    const prov = document.getElementById("week-province").value, secF = sSel.value, pilF = plSel.value;
     const rowsSem = EXT.filter((r) => jours.includes(r.date) && (!prov || r.province === prov));
-    const provsSem = [...new Set(rowsSem.map((r) => r.province))];
-    document.getElementById("week-intro").innerHTML =
-      `Semaine du <strong>${esc(frDate(lundi))}</strong> au <strong>${esc(frDate(dimanche))}</strong> : `
-      + `${jours.length} jour(s) de présentations (${esc(jours.map(jourCourt).join(", ") || "aucun")}), ${rowsSem.length} présentation(s), `
-      + `${provsSem.length} province(s). Un point repris plusieurs jours n'apparaît qu'une fois, avec le nombre de jours où il revient ; `
-      + `un défi présent tous les jours est signalé comme <em>persistant</em>.`;
-
-    // ── la semaine en chiffres
-    const somme = (f) => rowsSem.reduce((a, r) => { const v = f(r); return isNum(v) ? a + v : a; }, 0);
-    const nAvec = (f) => rowsSem.filter((r) => isNum(f(r))).length;
-    const casSem = somme((r) => cleNum(r, "cas_jour"));
-    const alertesSem = somme((r) => (kpiOf(r, "surveillance", "alertes_total") || {}).n ?? cleNum(r, "alertes"));
-    const posSem = somme((r) => { const p = kpiOf(r, "laboratoire", "taux_positivite"); return p ? p.n : null; });
-    const testSem = somme((r) => { const p = kpiOf(r, "laboratoire", "taux_positivite"); return p ? p.d : null; });
-    let deltaCumul = 0, nDelta = 0;
-    provsSem.forEach((p) => {
-      const vs = rowsSem.filter((r) => r.province === p && isNum(cleNum(r, "cumul_confirmes"))).sort((a, b) => a.date.localeCompare(b.date));
-      if (vs.length > 1) { deltaCumul += cleNum(vs[vs.length - 1], "cumul_confirmes") - cleNum(vs[0], "cumul_confirmes"); nDelta++; }
-    });
-    const scores = rowsSem.map((r) => (r.fiabilite || {}).score).filter(isNum);
-    const nCtrl = rowsSem.reduce((a, r) => a + (r.controles || []).filter((c) => c.niveau !== "info").length, 0);
-    const tuiles = [
-      ["Jours couverts", `${jours.length}`, `${rowsSem.length} présentations · ${provsSem.length} provinces`],
-      ["Cas confirmés de la semaine", fmt(casSem), `somme des cas du jour · ${nAvec((r) => cleNum(r, "cas_jour"))} présentations`],
-      ["Hausse du cumul des confirmés", nDelta ? `${deltaCumul >= 0 ? "+" : ""}${fmt(deltaCumul)}` : "–", nDelta ? `du premier au dernier jour · ${nDelta} province(s)` : "il faut au moins 2 jours"],
-      ["Alertes de la semaine", fmt(alertesSem), "somme des alertes du jour"],
-      ["Taux de positivité", fmtPct(pct(posSem, testSem)), testSem ? `${fmt(posSem)} positifs / ${fmt(testSem)} analysés` : "non calculable"],
-      ["Fiabilité moyenne", scores.length ? `${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}/100` : "–", `${fmt(nCtrl)} contrôle(s) à vérifier`],
-    ];
-    document.getElementById("week-kpis").innerHTML = tuiles.map(([l, v, sub]) =>
-      `<div class="kpi"><div class="label">${esc(l)}</div><div class="value">${v}</div><div class="sub">${esc(sub)}</div></div>`).join("");
-
-    // ── une fenêtre par pilier
     const joursProv = (p) => new Set(rowsSem.filter((r) => r.province === p).map((r) => r.date)).size;
-    const blocs = pillarOrder().filter((k) => !pilF || k === pilF).map((k, idx) => {
+    const blocs = pillarOrder().filter((k) => !pilF || k === pilF).map((k) => {
       const pls = rowsSem.flatMap((r) => (r.piliers || []).filter((pl) => pl.id === k).map((pl) => ({ r, pl })));
       const kpiHtml = (k === "coordination" || KPI_PILIERS.includes(k)) && !secF ? weekKpiTable(rowsSem, jours, k) : "";
       const secs = Object.keys(SECTION_NAMES).filter((sk) => !secF || sk === secF).map((sk) => {
-        const items = pls.flatMap(({ r, pl }) => (pl.sections[sk] || []).map((it) => ({ ...it, province: r.province, date: r.date, n: r.n_methodes })));
+        const items = pls.flatMap(({ r, pl }) => (pl.sections[sk] || []).map((it) => ({ ...it, province: r.province, date: r.date })));
         if (!items.length) return "";
         const gs = regrouper(items).sort((a, b) => b.dates.length - a.dates.length || a.province.localeCompare(b.province, "fr"));
         return `<h5 class="sec-${sk}">${esc(SECTION_NAMES[sk])} <span class="count">${gs.length}</span></h5><ul>`
@@ -1909,13 +2107,431 @@
           }).join("") + "</ul>";
       }).join("");
       if (!kpiHtml && !secs) return "";
-      const provsP = [...new Set(pls.map(({ r }) => r.province))];
-      const nItems = pls.reduce((a, { pl }) => a + Object.values(pl.sections || {}).reduce((b, l) => b + l.length, 0), 0);
-      return `<details class="week-pillar card"${idx < 2 || pilF ? " open" : ""}><summary><strong>${esc(EXT_LABELS.piliers[k])}</strong>`
-        + ` <span class="muted">${provsP.length} province(s) · ${fmt(nItems)} élément(s) sur la semaine</span></summary>`
-        + `${kpiHtml}${secs || (kpiHtml ? "" : "")}</details>`;
+      return `<details class="week-pillar"${pilF ? " open" : ""}><summary><strong>${esc(EXT_LABELS.piliers[k])}</strong></summary>${kpiHtml}${secs}</details>`;
     }).join("");
     root.innerHTML = blocs || `<p class="empty">Aucun élément pour cette sélection sur la semaine.</p>`;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Signal ZS : nouvelle zone de santé touchée, ZS de nouveau active (P.alertes_zs, common/priorites.py)
+  // Bandeau en tête de toutes les pages, contour sur les cartes, badge dans les tableaux de zones.
+  // ════════════════════════════════════════════════════════════
+  const ALERTES_ZS = P.alertes_zs || [];
+  const ZS_TYPES = { nouvelle: "Nouvelle ZS touchée", reactivee: "ZS de nouveau active", carte: "ZS touchées en hausse" };
+  /** Événements des 21 jours qui précèdent `d` (inclus) : la fenêtre d'incubation maximale. */
+  function zsRecents(d = DATE, prov = null) {
+    const debut = addDays(d, -20);
+    return ALERTES_ZS.filter((e) => e.date <= d && e.date >= debut && (!prov || e.province === prov));
+  }
+  /** province|zone (clé normalisée) -> événement le plus récent, pour la carte et les tableaux. */
+  function zsIndex(d = DATE) {
+    const m = {};
+    zsRecents(d).forEach((e) => { if (e.zone) m[`${e.province}|${normKey(e.zone)}`] = e; });
+    return m;
+  }
+  const zsDe = (idx, prov, zone) => idx[`${prov}|${normKey(zone)}`] || null;
+  const zsBadge = (e) => (!e ? "" : ` <span class="zs-badge ${e.type}" title="${esc(`${ZS_TYPES[e.type]} le ${frDate(e.date)} : ${e.texte}`)}">${e.type === "nouvelle" ? "Nouvelle" : "Réactivée"}</span>`);
+
+  function renderZsAlert() {
+    const el = document.getElementById("zs-alert");
+    if (!el) return;
+    const prov = VIEW === "province" ? document.body.dataset.province : null;
+    const ev = zsRecents(DATE, prov).slice().sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+    if (!ev.length) { el.hidden = true; el.innerHTML = ""; return; }
+    const nNouv = ev.filter((e) => e.type !== "reactivee").length, nReact = ev.filter((e) => e.type === "reactivee").length;
+    const resume = [nNouv ? `${nNouv} nouvelle${nNouv > 1 ? "s" : ""} ZS touchée${nNouv > 1 ? "s" : ""}` : "",
+      nReact ? `${nReact} ZS de nouveau active${nReact > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
+    const li = (e) => `<li><span class="zs-type ${e.type}">${esc(ZS_TYPES[e.type])}</span> `
+      + `<strong>${esc(e.zone || "ZS non nommée")}</strong> <span class="muted">·</span> ${provLink(e.province)} `
+      + `<span class="zs-when">${e.date === DATE ? '<span class="zs-today">ce jour</span>' : `le ${esc(shortDate(e.date))}`}</span>`
+      + `${e.a_verifier ? ' <span class="zs-verif" title="Voir le détail">à vérifier</span>' : ""}`
+      + `<span class="zs-det">${esc(e.texte)}</span></li>`;
+    el.hidden = false;
+    el.innerHTML = `<div class="zs-alert-head"><span class="zs-ic" aria-hidden="true">⚠</span><div><strong>Signal à ne pas manquer : ${esc(resume)}</strong>`
+      + `<span class="zs-alert-sub">21 derniers jours au ${esc(frDate(DATE))}${prov ? ` · ${esc(prov)}` : ""} — extension ou résurgence : investigation, listage et suivi des contacts, `
+      + `vaccination en anneau et renforcement de la surveillance à engager sans délai.</span></div></div>`
+      + `<ul class="zs-list">${ev.slice(0, 8).map(li).join("")}</ul>`
+      + (ev.length > 8 ? `<p class="muted small">+ ${ev.length - 8} autre(s) : voir la page Semaine.</p>` : "");
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Page province : encadré « Priorités de la semaine »
+  // ════════════════════════════════════════════════════════════
+  function renderProvincePriorites(prov) {
+    const body = document.getElementById("prov-prio-body"), sub = document.getElementById("prov-prio-sub");
+    if (!body) return;
+    const cle = semainePour(DATE);
+    const S = cle ? SEMAINES[cle] : null;
+    const R = S && S.provinces[prov];
+    if (!S || !R || !R.recus) {
+      sub.textContent = "";
+      body.innerHTML = `<p class="empty">Aucune présentation de ${esc(prov)} extraite pour la semaine du ${esc(frDate(weekStart(DATE)))}.</p>`;
+      return;
+    }
+    sub.innerHTML = `Semaine du ${esc(frDate(S.lundi))} au ${esc(frDate(S.dimanche))} · ${R.recus}/${R.attendus} présentation(s) reçue(s) · `
+      + `<a href="${withDate("semaine.html")}">voir toutes les provinces →</a>`;
+    const sig = S.signaux || [];
+    const ligne = (s) => {
+      const [cls, ic, lab] = NIV[s.niveau];
+      return `<li class="pp-sig ${cls}"><span class="pp-niv"><span aria-hidden="true">${ic}</span> ${esc(lab)}</span>`
+        + `<span class="pp-titre">${esc(s.titre)}</span><span class="pp-det">${esc(s.detail)}</span></li>`;
+    };
+    const bons = (S.bonnes_nouvelles || []).map((b) => `<li class="pp-sig ok"><span class="pp-niv"><span aria-hidden="true">✓</span> Bonne nouvelle</span>`
+      + `<span class="pp-titre">${esc(b.titre)}</span>${b.detail ? `<span class="pp-det">${esc(b.detail)}</span>` : ""}</li>`);
+    const listeSig = sig.length
+      ? sig.slice(0, 6).map(ligne).join("") + (sig.length > 6 ? `<li class="muted small">+ ${sig.length - 6} autre(s) signal(aux) sur la page Semaine</li>` : "")
+      : '<li class="pp-sig ok"><span class="pp-niv"><span aria-hidden="true">✓</span> Aucun écart</span><span class="pp-titre">Aucun écart aux cibles détecté cette semaine</span></li>';
+    const chips = PDEF.indicateurs.map((d) => {
+      const x = R.indicateurs[d.id];
+      const st = x ? x.statut : "nd";
+      const [cls, ic, lab] = STAT[st];
+      return `<span class="ind-chip ${cls}" title="${esc(x ? `${x.texte}. Cible : ${d.cible}` : `Non rapporté cette semaine. Cible : ${d.cible}`)}">`
+        + `<span class="ic" aria-hidden="true">${ic}</span>${esc(d.libelle)}<span class="sr">${esc(lab)}</span></span>`;
+    }).join("");
+    const pts = (S.points || []).slice(0, 3);
+    body.innerHTML = `<div class="pp-grid"><div><h4 class="pp-h">Ce qui demande une action</h4><ul class="pp-list">${listeSig}${bons.join("")}</ul></div>`
+      + `<div><h4 class="pp-h">Indicateurs de riposte</h4><div class="ind-chips">${chips}</div>`
+      + `<p class="muted small">Couleur = statut sur la semaine par rapport à la cible ; survolez pour la valeur.</p>`
+      + (pts.length ? `<h4 class="pp-h">Ce que remonte la province</h4><ul class="pp-points">${pts.map((x) => `<li><span class="theme-tag">${esc(PDEF.themes[x.theme] || x.theme)}</span> ${esc(x.texte)}`
+        + `${x.jours > 1 ? ` <span class="rep${x.persistant ? " persist" : ""}">${x.persistant ? "persistant · " : ""}${x.jours} j.</span>` : ""}</li>`).join("")}</ul>` : "")
+      + "</div></div>";
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Export du résumé de la semaine (PDF par l'impression du navigateur, Word .docx) pour la réunion de coordination.
+  // Un seul modèle de rapport (blocs) rendu deux fois : en HTML imprimable et en document Word.
+  // ════════════════════════════════════════════════════════════
+  const RC = { // couleurs du rapport (fixes : le document ne suit pas le thème sombre)
+    ok: ["D9EFDB", "1E6B32", "✓", "Cible atteinte"], attention: ["FCE9B8", "8A5A00", "!", "À surveiller"],
+    critique: ["F3C6C3", "A61B1B", "✕", "Critique"], nd: ["ECEAE6", "8B867D", "–", "Non rapporté"],
+    niv: { critique: ["F3C6C3", "A61B1B"], eleve: ["FCE9B8", "8A5A00"], modere: ["FFF6D9", "7A6400"], info: ["ECEAE6", "5C5850"] },
+  };
+  const svgEsc = (s) => esc(s);
+
+  function svgCas(S) {
+    const fin = S.dimanche, debut = addDays(S.lundi, -14);
+    const jours = extDates().filter((d) => d >= debut && d <= fin);
+    const provs = [...new Set(EXT.map((r) => r.province))].sort((a, b) => a.localeCompare(b, "fr"));
+    if (!jours.length || !provs.length) return null;
+    const W = 680, L = 118, R = 78, rowH = 40, top = 8, n = jours.length;
+    const step = (W - L - R) / n, bw = Math.min(26, step * 0.7);
+    const H = top + provs.length * rowH + 30;
+    const parts = [];
+    const valsDe = (p) => jours.map((d) => { const r = EXT.find((x) => x.date === d && x.province === p); return r ? cleNum(r, "cas_jour") : null; });
+    provs.forEach((p, i) => {
+      const vals = valsDe(p);
+      const max = Math.max(1, ...vals.filter(isNum)); // échelle propre à chaque province, valeurs écrites sur les barres
+      const y0 = top + i * rowH, base = y0 + rowH - 10;
+      const tot = vals.filter(isNum).reduce((a, b) => a + b, 0);
+      parts.push(`<text x="0" y="${base - 8}" font-size="12" font-weight="bold" fill="#2a2a27">${svgEsc(p)}</text>`);
+      parts.push(`<line x1="${L}" y1="${base}" x2="${W - R}" y2="${base}" stroke="#d8d3ca" stroke-width="1"/>`);
+      vals.forEach((v, j) => {
+        const x = L + j * step + (step - bw) / 2;
+        if (!isNum(v)) { parts.push(`<rect x="${x}" y="${base - 2}" width="${bw}" height="2" fill="#c9c4ba"/>`); return; }
+        const h = Math.max(v > 0 ? 2 : 0.5, (v / max) * (rowH - 18));
+        parts.push(`<rect x="${x}" y="${base - h}" width="${bw}" height="${h}" fill="${jours[j] >= S.lundi ? "#a83a2b" : "#d9a196"}"/>`);
+        if (v > 0) parts.push(`<text x="${x + bw / 2}" y="${base - h - 2}" font-size="9" text-anchor="middle" fill="#5c5850">${fmt(v)}</text>`);
+      });
+      parts.push(`<text x="${W - 8}" y="${base - 8}" font-size="11" text-anchor="end" fill="#5c5850">${fmt(tot)} cas</text>`);
+    });
+    const yA = top + provs.length * rowH + 4;
+    jours.forEach((d, j) => parts.push(`<text x="${L + j * step + step / 2}" y="${yA + 10}" font-size="9" text-anchor="middle" fill="#8a8478">${svgEsc(shortDate(d))}</text>`));
+    parts.push(`<text x="${L}" y="${yA + 24}" font-size="9.5" fill="#8a8478">Foncé : semaine du rapport · clair : 2 semaines précédentes · gris : non rapporté · échelle propre à chaque province</text>`);
+    return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif"><rect width="${W}" height="${H}" fill="#ffffff"/>${parts.join("")}</svg>`, w: W, h: H };
+  }
+
+  function svgZs(S) {
+    const lignes = Object.keys(S.provinces).filter((p) => S.provinces[p].recus).map((p) => ({ p, z: S.provinces[p].zs || {} }))
+      .map(({ p, z }) => ({ p, a: (z.active || []).length, v: (z.vigilance || []).length, c: (z.controlee || []).length }))
+      .filter((x) => x.a + x.v + x.c);
+    if (!lignes.length) return null;
+    const W = 680, L = 118, R = 50, rowH = 26, top = 30;
+    const max = Math.max(...lignes.map((x) => x.a + x.v + x.c));
+    const k = (W - L - R) / max;
+    const H = top + lignes.length * rowH + 8;
+    const cols = [["a", "#d03b3b", "Active (≤ 21 j)"], ["v", "#f2a900", "Vigilance (22–42 j)"], ["c", "#2e9b3a", "Sous contrôle (> 42 j)"]];
+    const parts = cols.map(([, c, lab], i) => `<rect x="${L + i * 170}" y="6" width="12" height="12" fill="${c}"/><text x="${L + i * 170 + 17}" y="16" font-size="11" fill="#2a2a27">${svgEsc(lab)}</text>`);
+    lignes.forEach((x, i) => {
+      const y = top + i * rowH;
+      parts.push(`<text x="0" y="${y + 15}" font-size="12" font-weight="bold" fill="#2a2a27">${svgEsc(x.p)}</text>`);
+      let cx = L;
+      cols.forEach(([key, c]) => {
+        const n = x[key];
+        if (!n) return;
+        parts.push(`<rect x="${cx}" y="${y + 2}" width="${n * k}" height="18" fill="${c}"/>`);
+        if (n * k > 16) parts.push(`<text x="${cx + (n * k) / 2}" y="${y + 15}" font-size="11" text-anchor="middle" fill="#ffffff" font-weight="bold">${n}</text>`);
+        cx += n * k;
+      });
+      parts.push(`<text x="${cx + 6}" y="${y + 15}" font-size="11" fill="#5c5850">${x.a + x.v + x.c} ZS</text>`);
+    });
+    return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif"><rect width="${W}" height="${H}" fill="#ffffff"/>${parts.join("")}</svg>`, w: W, h: H };
+  }
+
+  /** Modèle du rapport : liste de blocs {k: title|sub|h1|h2|p|bullets|table|img|note}. */
+  function modeleRapport(S) {
+    const B = [];
+    const gen = new Date();
+    B.push({ k: "title", t: "MVE Bundibugyo 2026 — Résumé hebdomadaire des présentations provinciales" });
+    B.push({ k: "sub", t: `Semaine du ${frDate(S.lundi)} au ${frDate(S.dimanche)} · ${S.jours.length} jour(s) de données (${S.jours.map(shortDate).join(", ")}), présentées le lendemain` });
+    B.push({ k: "conf", t: `Données préliminaires et confidentielles, telles que présentées par les DPS — ne pas diffuser. Généré le ${gen.toLocaleDateString("fr-FR")} à ${gen.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.` });
+
+    B.push({ k: "h1", t: "Lecture de la semaine" });
+    S.lecture.forEach((t, i) => B.push({ k: "p", runs: [{ t, b: i === 0 }] }));
+
+    const ev = ALERTES_ZS.filter((e) => e.date <= S.dimanche && e.date >= addDays(S.dimanche, -20));
+    if (ev.length) {
+      B.push({ k: "h1", t: "Signal à ne pas manquer : nouvelles ZS et ZS réactivées (21 derniers jours)" });
+      B.push({ k: "table", cols: [12, 16, 18, 18, 36], head: ["Date", "Province", "Zone de santé", "Signal", "Détail"],
+        rows: ev.map((e) => [{ t: shortDate(e.date) }, { t: e.province }, { t: e.zone || "non nommée", b: true },
+          { t: ZS_TYPES[e.type] + (e.a_verifier ? " (à vérifier)" : ""), fill: RC.niv.critique[0], color: RC.niv.critique[1], b: true }, { t: e.texte }]) });
+      B.push({ k: "note", t: "Nouvelle ZS : première apparition avec au moins un cas confirmé dans le tableau des cas de la province. ZS de nouveau active : dernier cas ≤ 21 jours (ou cumul en hausse) alors qu'elle était en vigilance (22–42 j) ou sous contrôle (> 42 j)." });
+    }
+
+    B.push({ k: "h1", t: "Priorités de la semaine" });
+    const prio = S.priorites || [];
+    if (prio.length) {
+      B.push({ k: "table", cols: [13, 27, 44, 16], head: ["Niveau", "Priorité", "Ce que montrent les chiffres", "Cible"],
+        rows: prio.map((g) => [{ t: NIV[g.niveau][2], fill: RC.niv[g.niveau][0], color: RC.niv[g.niveau][1], b: true },
+          { runs: [{ t: g.titre, b: true }, { t: "\n" + g.provinces.join(", "), color: "7C1D1D" }] },
+          { t: g.details.map((d) => `${d.province} — ${d.texte}`).join("\n") }, { t: g.cible || "", color: "5C5850" }]) });
+    } else B.push({ k: "p", t: "Aucun écart aux cibles détecté cette semaine." });
+    const bons = S.bonnes_nouvelles || [];
+    if (bons.length) {
+      B.push({ k: "h2", t: "Bonnes nouvelles" });
+      B.push({ k: "bullets", items: bons.map((b) => [{ t: b.province + " — ", b: true }, { t: b.titre }, ...(b.detail ? [{ t: ` (${b.detail})`, color: "5C5850" }] : [])]) });
+    }
+
+    B.push({ k: "h1", t: "Indicateurs de riposte par province" });
+    const inds = PDEF.indicateurs;
+    const provs = Object.keys(S.provinces).filter((p) => S.provinces[p].recus);
+    const wInd = (82 / inds.length);
+    const COURT = { incidence: "Tendance des cas", zs_actives: "ZS actives", extension: "Nouvelles ZS", suivi_contacts: "Contacts suivis",
+      alertes: "Alertes vérifiées", isolement: "Suspects isolés", positivite: "Positivité labo", deces_communautaires: "Décès commun.",
+      agents_sante: "Agents de santé", completude: "Présent. reçues" };
+    B.push({ k: "table", small: true, cols: [18, ...inds.map(() => wInd)], head: ["Province", ...inds.map((d) => COURT[d.id] || d.libelle)], center: true,
+      rows: provs.map((p) => [{ t: p, b: true, left: true }, ...inds.map((d) => {
+        const x = S.provinces[p].indicateurs[d.id];
+        const c = RC[x ? x.statut : "nd"];
+        return { t: c[2], fill: c[0], color: c[1], b: true };
+      })]) });
+    B.push({ k: "note", t: `✓ cible atteinte · ! à surveiller · ✕ critique · – non rapporté. Cibles : ${inds.map((d) => `${d.libelle} : ${d.cible}`).join(" ; ")}.` });
+
+    const cas = svgCas(S);
+    if (cas) { B.push({ k: "h1", t: "Nouveaux cas confirmés par jour (3 dernières semaines)" }); B.push({ k: "img", ...cas, alt: "Nouveaux cas confirmés par jour et par province" }); }
+    const zs = svgZs(S);
+    if (zs) {
+      B.push({ k: "h1", t: "Zones de santé : statut 21 et 42 jours" });
+      B.push({ k: "img", ...zs, alt: "Zones de santé actives, en vigilance et sous contrôle par province" });
+      B.push({ k: "note", t: "Seulement les provinces dont le tableau par zone de santé donne la date du dernier cas. 42 jours sans nouveau cas : critère OMS de fin de transmission." });
+    }
+
+    const pts = S.points || [];
+    if (pts.length) {
+      B.push({ k: "h1", t: "Ce que remontent les provinces" });
+      const parTheme = {};
+      pts.forEach((x) => { (parTheme[x.theme] = parTheme[x.theme] || []).push(x); });
+      Object.keys(parTheme).sort((a, b) => parTheme[b].reduce((s, x) => s + x.score, 0) - parTheme[a].reduce((s, x) => s + x.score, 0)).forEach((t) => {
+        B.push({ k: "h2", t: PDEF.themes[t] || t });
+        B.push({ k: "bullets", items: parTheme[t].slice(0, 5).map((x) => [{ t: x.texte }, { t: ` — ${x.provinces.join(", ")}${x.jours > 1 ? ` (${x.persistant ? "persistant, " : ""}${x.jours} j.)` : ""}`, color: "7C1D1D" }]) });
+      });
+    }
+    B.push({ k: "note", t: PDEF.reference + " Seuils intermédiaires (à surveiller / critique) : choix de l'équipe d'analyse, à valider." });
+    return B;
+  }
+
+  // ── rendu HTML imprimable (PDF) ──
+  function rapportHTML(B, titre) {
+    const runs = (b) => (b.runs || [{ t: b.t || "", b: b.b, color: b.color }]).map((r) => {
+      const t = esc(r.t).replace(/\n/g, "<br>");
+      const st = r.color ? ` style="color:#${r.color}"` : "";
+      return r.b ? `<strong${st}>${t}</strong>` : st ? `<span${st}>${t}</span>` : t;
+    }).join("");
+    const corps = B.map((b) => {
+      switch (b.k) {
+        case "title": return `<h1>${esc(b.t)}</h1>`;
+        case "sub": return `<p class="sub">${esc(b.t)}</p>`;
+        case "conf": return `<p class="conf">${esc(b.t)}</p>`;
+        case "h1": return `<h2>${esc(b.t)}</h2>`;
+        case "h2": return `<h3>${esc(b.t)}</h3>`;
+        case "p": return `<p>${runs(b)}</p>`;
+        case "note": return `<p class="note">${esc(b.t)}</p>`;
+        case "bullets": return `<ul>${b.items.map((it) => `<li>${runs({ runs: it })}</li>`).join("")}</ul>`;
+        case "img": return `<figure>${b.svg.replace("<svg ", `<svg role="img" aria-label="${esc(b.alt)}" style="width:100%;height:auto" `)}</figure>`;
+        case "table": return `<table class="${b.small ? "small" : ""}"><colgroup>${b.cols.map((w) => `<col style="width:${w}%">`).join("")}</colgroup>`
+          + `<thead><tr>${b.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>`
+          + b.rows.map((r) => `<tr>${r.map((c) => `<td style="${c.fill ? `background:#${c.fill};` : ""}${b.center && !c.left ? "text-align:center;" : ""}">${runs(c)}</td>`).join("")}</tr>`).join("")
+          + "</tbody></table>";
+        default: return "";
+      }
+    }).join("\n");
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${esc(titre)}</title><style>
+      @page { size: A4; margin: 14mm 14mm 16mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+      body { font: 10.5pt/1.45 Arial, Helvetica, sans-serif; color: #2a2a27; margin: 0; }
+      h1 { font-size: 17pt; color: #7c1d1d; margin: 0 0 4px; }
+      h2 { font-size: 12.5pt; color: #7c1d1d; border-bottom: 1.5px solid #e2ddd3; padding-bottom: 3px; margin: 16px 0 6px; break-after: avoid; }
+      h3 { font-size: 11pt; margin: 10px 0 3px; break-after: avoid; }
+      p { margin: 0 0 5px; } .sub { font-weight: bold; } .conf { color: #a61b1b; font-size: 9pt; margin-bottom: 10px; }
+      .note { color: #6b665d; font-size: 8.5pt; }
+      ul { margin: 0 0 6px; padding-left: 16px; } li { margin: 0 0 2px; break-inside: avoid; }
+      table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; table-layout: fixed; font-size: 9pt; }
+      table.small { font-size: 8pt; } th { background: #f0eee9; text-align: left; font-weight: bold; }
+      th, td { border: 1px solid #d8d3ca; padding: 3px 5px; vertical-align: top; overflow-wrap: anywhere; }
+      table.small th { text-align: center; font-size: 7.5pt; } tr { break-inside: avoid; }
+      figure { margin: 4px 0 6px; break-inside: avoid; }
+    </style></head><body>${corps}</body></html>`;
+  }
+
+  function exporterPDF(S) {
+    const titre = `Résumé MVE semaine du ${shortDate(S.lundi)}`;
+    const ifr = document.createElement("iframe");
+    ifr.setAttribute("aria-hidden", "true");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(ifr);
+    const doc = ifr.contentDocument;
+    doc.open(); doc.write(rapportHTML(modeleRapport(S), titre)); doc.close();
+    const titreAvant = document.title;
+    const lancer = () => {
+      document.title = titre;                       // nom de fichier proposé par « Enregistrer au format PDF »
+      ifr.contentWindow.focus();
+      ifr.contentWindow.print();
+      setTimeout(() => { document.title = titreAvant; ifr.remove(); }, 1500);
+    };
+    setTimeout(lancer, 250);
+  }
+
+  // ── document Word (.docx) écrit à la main : zip sans compression + WordprocessingML ──
+  const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = (u8) => { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  function zipStore(files) { // files: [{name, data: Uint8Array}]
+    const enc = new TextEncoder(), chunks = [], central = [];
+    let off = 0;
+    const u16 = (v) => [v & 0xff, (v >>> 8) & 0xff], u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+    files.forEach((f) => {
+      const nm = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+      const head = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(n), ...u32(n), ...u16(nm.length), ...u16(0)]);
+      chunks.push(head, nm, f.data);
+      central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(n), ...u32(n), ...u16(nm.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), nm);
+      off += head.length + nm.length + n;
+    });
+    const cdSize = central.reduce((a, c) => a + c.length, 0);
+    const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), ...u16(0)]);
+    return new Blob([...chunks, ...central, end], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  }
+  async function svgPng(svg, w, h, scale = 2) {
+    const img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/png"));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  const xesc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  async function exporterWord(S) {
+    const B = modeleRapport(S);
+    const TW = 9638; // largeur utile A4 (marges 2 cm), en vingtièmes de point
+    const medias = [];
+    const run = (r, sz) => String(r.t).split("\n").map((t, i) => `<w:r><w:rPr>${r.b ? "<w:b/>" : ""}${r.color ? `<w:color w:val="${r.color}"/>` : ""}${sz ? `<w:sz w:val="${sz}"/>` : ""}</w:rPr>${i ? "<w:br/>" : ""}<w:t xml:space="preserve">${xesc(t)}</w:t></w:r>`).join("");
+    const runs = (b, sz) => (b.runs || [{ t: b.t || "", b: b.b, color: b.color }]).map((r) => run({ ...r, b: r.b || b.b, color: r.color || b.color }, sz)).join("");
+    const para = (inner, style, extra = "") => `<w:p><w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ""}${extra}</w:pPr>${inner}</w:p>`;
+    const corps = [];
+    for (const b of B) {
+      if (b.k === "title") corps.push(para(runs(b), "Title"));
+      else if (b.k === "sub") corps.push(para(runs({ ...b, b: true }), null));
+      else if (b.k === "conf") corps.push(para(runs({ ...b, color: "A61B1B" }, 17), null));
+      else if (b.k === "h1") corps.push(para(runs(b), "Heading1"));
+      else if (b.k === "h2") corps.push(para(runs(b), "Heading2"));
+      else if (b.k === "p") corps.push(para(runs(b), null));
+      else if (b.k === "note") corps.push(para(runs({ ...b, color: "6B665D" }, 16), null));
+      else if (b.k === "bullets") b.items.forEach((it) => corps.push(para(`<w:r><w:t xml:space="preserve">•	</w:t></w:r>` + runs({ runs: it }), null, '<w:tabs><w:tab w:val="left" w:pos="284"/></w:tabs><w:ind w:left="284" w:hanging="284"/><w:spacing w:after="40"/>')));
+      else if (b.k === "img") {
+        const png = await svgPng(b.svg, b.w, b.h);
+        const id = medias.length + 1;
+        medias.push({ name: `word/media/image${id}.png`, data: png });
+        const cx = Math.round(TW * 635), cy = Math.round((cx * b.h) / b.w); // 1 twip = 635 EMU
+        corps.push(`<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="Graphique ${id}" descr="${xesc(b.alt)}"/>`
+          + `<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`
+          + `<pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="image${id}.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
+          + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
+      } else if (b.k === "table") {
+        const ws = b.cols.map((p) => Math.round((TW * p) / 100));
+        const sz = b.small ? 15 : 17;
+        const cell = (c, w, head) => `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${c.fill || head ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.fill || "F0EEE9"}"/>` : ""}</w:tcPr>`
+          + `<w:p><w:pPr><w:spacing w:before="20" w:after="20"/>${(b.center && !c.left) || (head && b.small) ? '<w:jc w:val="center"/>' : ""}</w:pPr>${runs(head ? { t: c.t, b: true } : c, head && b.small ? 13 : sz)}</w:p></w:tc>`;
+        const bord = ["top", "left", "bottom", "right", "insideH", "insideV"].map((k) => `<w:${k} w:val="single" w:sz="4" w:space="0" w:color="D8D3CA"/>`).join("");
+        corps.push(`<w:tbl><w:tblPr><w:tblW w:w="${TW}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bord}</w:tblBorders><w:tblCellMar><w:left w:w="70" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tblCellMar></w:tblPr>`
+          + `<w:tblGrid>${ws.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`
+          + `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${b.head.map((h, i) => cell({ t: h }, ws[i], true)).join("")}</w:tr>`
+          + b.rows.map((r) => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${r.map((c, i) => cell(c, ws[i], false)).join("")}</w:tr>`).join("")
+          + "</w:tbl>" + para("", null, '<w:spacing w:after="60"/>'));
+      }
+    }
+    const NSW = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+    const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NSW} xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>`
+      + corps.join("") + `<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+    const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NSW}><w:p><w:pPr><w:jc w:val="center"/></w:pPr>`
+      + `<w:r><w:rPr><w:color w:val="8A8478"/><w:sz w:val="15"/></w:rPr><w:t xml:space="preserve">Données préliminaires et confidentielles — ne pas diffuser · Semaine du ${xesc(frDate(S.lundi))} · page </w:t></w:r>`
+      + `<w:fldSimple w:instr="PAGE"><w:r><w:rPr><w:color w:val="8A8478"/><w:sz w:val="15"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>`;
+    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NSW}>`
+      + `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="fr-FR"/></w:rPr></w:rPrDefault>`
+      + `<w:pPrDefault><w:pPr><w:spacing w:after="80" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>`
+      + `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>`
+      + `<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="60"/></w:pPr><w:rPr><w:b/><w:color w:val="7C1D1D"/><w:sz w:val="32"/></w:rPr></w:style>`
+      + `<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="100"/><w:pBdr><w:bottom w:val="single" w:sz="8" w:space="2" w:color="E2DDD3"/></w:pBdr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:color w:val="7C1D1D"/><w:sz w:val="25"/></w:rPr></w:style>`
+      + `<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="160" w:after="60"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="22"/></w:rPr></w:style>`
+      + `</w:styles>`;
+    const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+      + `<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`
+      + `<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>`
+      + medias.map((m, i) => `<Relationship Id="rIdImg${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i + 1}.png"/>`).join("")
+      + `</Relationships>`;
+    const types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
+      + `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>`
+      + `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>`
+      + `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`
+      + `<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>`
+      + `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
+    const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+      + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>`
+      + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
+    const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`
+      + `<dc:title>${xesc(`MVE Bundibugyo 2026 — résumé de la semaine du ${frDate(S.lundi)}`)}</dc:title><dc:language>fr-FR</dc:language>`
+      + `<dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0, 19)}Z</dcterms:created></cp:coreProperties>`;
+    const enc = new TextEncoder();
+    const blob = zipStore([
+      { name: "[Content_Types].xml", data: enc.encode(types) }, { name: "_rels/.rels", data: enc.encode(rootRels) },
+      { name: "docProps/core.xml", data: enc.encode(core) }, { name: "word/document.xml", data: enc.encode(docXml) },
+      { name: "word/styles.xml", data: enc.encode(styles) }, { name: "word/footer1.xml", data: enc.encode(footer) },
+      { name: "word/_rels/document.xml.rels", data: enc.encode(rels) }, ...medias,
+    ]);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `MVE_resume_semaine_${S.lundi}.docx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+
+  function initExport() {
+    const bp = document.getElementById("export-pdf"), bw = document.getElementById("export-word");
+    if (!bp || bp.dataset.bound) return;
+    bp.dataset.bound = "1";
+    const S = () => SEMAINES[semainePour(DATE)];
+    bp.addEventListener("click", () => { if (S()) exporterPDF(S()); });
+    bw.addEventListener("click", async () => {
+      if (!S()) return;
+      const lab = bw.textContent;
+      bw.disabled = true; bw.textContent = "Préparation…";
+      let ok = true;
+      try { await exporterWord(S()); } catch (e) { ok = false; console.error(e); }
+      bw.disabled = false;
+      bw.textContent = ok ? lab : "Échec : utiliser PDF";
+      if (!ok) setTimeout(() => { bw.textContent = lab; }, 4000);
+    });
   }
 
   // ── Dispatch ──────────────────────────────────────────────
@@ -1927,10 +2543,13 @@
       return;
     }
     renderTracker();
+    ZSI = zsIndex(DATE);
+    renderZsAlert();
     (RENDER[VIEW] || (() => {}))();
   }
 
   initDateSelect();
+  initProvinceMenu();
   // téléphone : l'onglet actif est ramené au centre de la bande d'onglets qui défile
   (() => {
     const strip = document.querySelector(".tab-links"), act = strip && strip.querySelector(".tab.active");
@@ -1941,6 +2560,19 @@
   if (VIEW === "zones") getZoneProvince = initChips(document.getElementById("province-filter"), provinces, render);
   if (VIEW === "alerts") getAlertProvince = initChips(document.getElementById("province-filter"), provinces, render);
   render();
+  // lien venu du chatbot (page.html?date=…#section) : la section est rendue, puis montrée et soulignée un instant
+  (() => {
+    const id = decodeURIComponent((location.hash || "").slice(1));
+    const el = id && document.getElementById(id);
+    if (!el) return;
+    const bloc = el.closest(".card, section") || el;
+    setTimeout(() => {
+      bloc.scrollIntoView({ block: "start", behavior: "smooth" });
+      bloc.style.transition = "box-shadow .4s";
+      bloc.style.boxShadow = "0 0 0 3px #1b4671";
+      setTimeout(() => { bloc.style.boxShadow = ""; }, 2500);
+    }, 150);
+  })();
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);

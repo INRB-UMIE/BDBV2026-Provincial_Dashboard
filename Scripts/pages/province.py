@@ -13,6 +13,11 @@ VIEW_ID = PROVINCE_VIEW_ID
 
 BODY = """
 <p class="breadcrumb"><a href="synthese.html" data-keep-date>← Synthèse</a></p>
+<article class="card prov-prio" id="prov-prio" aria-labelledby="prov-prio-title">
+  <header class="card-head"><h3 id="prov-prio-title">Priorités de la semaine</h3>
+    <p class="card-sub" id="prov-prio-sub"></p></header>
+  <div id="prov-prio-body"></div>
+</article>
 <article class="card summary-card">
   <header class="card-head"><h3>Résumé</h3></header>
   <div id="prov-summary" class="prose"></div>
@@ -21,6 +26,17 @@ BODY = """
 <article class="card map-card">
   <header class="card-head"><h3>Carte des zones de santé</h3></header>
   <div class="map-root embed" id="map-root" data-map-mode="embed"></div>
+</article>
+<article class="card">
+  <header class="card-head map-head"><div><h3>ZS touchées sans nouveau cas notifié</h3>
+    <p class="card-sub">Zones avec au moins un cas confirmé, classées selon les jours écoulés depuis leur dernier cas : 21 à 42 jours
+    (vigilance : la période d'incubation est passée, la transmission n'est pas encore déclarée terminée) ou plus de 42 jours
+    (fin de transmission, critère OMS). Sur la carte : couche « Statut des zones de santé ».</p></div>
+    <div class="seg" role="group" aria-label="Jours sans nouveau cas">
+      <button type="button" class="seg-btn" data-sanscas="vig" aria-pressed="true">21 à 42 j</button>
+      <button type="button" class="seg-btn" data-sanscas="ctrl" aria-pressed="false">&gt; 42 j</button>
+    </div></header>
+  <div id="zs-sans-cas"></div>
 </article>
 <section class="grid-2">
   <article class="card">

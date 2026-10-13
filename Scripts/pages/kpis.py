@@ -20,14 +20,16 @@ def _bloc(pid: str, titre: str, sous_titre: str, titre_graphique: str) -> str:
   <section class="kpis kpis-pillar" id="kpis-{pid}" aria-label="{titre} : toutes provinces"></section>
   <div class="kpi-pillar-body">
     <div><h4 class="chart-title">{titre_graphique}</h4><div class="chart" id="chart-{pid}"></div></div>
-    <div class="table-wrap" id="table-{pid}"></div>
+    <details class="raw-values"><summary>Voir les chiffres par province</summary>
+      <div class="table-wrap" id="table-{pid}"></div></details>
   </div>
 </article>"""
 
 
 BODY = """
 <div class="coverage-note" id="extraction-note" role="status"></div>
-<p class="page-intro">KPI lus dans les présentations provinciales du jour : ligne Total des tableaux en priorité, puis
+<p class="page-intro"><strong>Pour une lecture par priorités et par cibles OMS de la semaine, voir l'onglet
+<a href="semaine.html">Semaine</a>.</strong> KPI lus dans les présentations provinciales du jour : ligne Total des tableaux en priorité, puis
 tableaux d'évolution (colonne du jour), cartes, phrases et, pour les diapositives en image, OCR. Les taux sont
 recalculés. Les totaux « toutes provinces » ne portent que sur les provinces qui rapportent la valeur.
 Survolez une valeur pour voir sa diapositive, sa source et le nombre de méthodes de lecture qui la retrouvent.</p>

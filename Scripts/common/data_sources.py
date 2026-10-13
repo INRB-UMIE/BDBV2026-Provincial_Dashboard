@@ -8,6 +8,7 @@ of the build failing (same policy as the epidemic dashboard).
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -141,6 +142,7 @@ def _compact_presentation(date: str, pr: dict) -> dict:
         "date_garde": pr.get("date_garde"), "n_diapos": pr.get("nb_diapositives"),
         "n_methodes": len(pr.get("methodes") or []),
         "fiabilite": pr.get("fiabilite") or {}, "controles": pr.get("controles") or [],
+        "note_fichier": pr.get("note_fichier"),
         "cles": cles, "piliers": list(piliers.values()),
     }
 
@@ -150,7 +152,7 @@ def load_extractions() -> dict:
 
     Lit EXTRACTION_DIR/PRESENTATION_*/extraction/extraction_*.json. Absent -> listes vides (pas d'erreur).
     """
-    out = {"rows": [], "piliers": {}, "sections": {}, "kpi_definitions": {}}
+    out = {"rows": [], "piliers": {}, "sections": {}, "kpi_definitions": {}, "echecs": []}
     if not EXTRACTION_DIR.exists():
         print(f"  WARNING: {EXTRACTION_DIR} not found; « Piliers et fiabilité » will be empty")
         return out
@@ -164,12 +166,22 @@ def load_extractions() -> dict:
         date = _iso(data.get("date", ""))
         if not date:
             continue
+        # convention : « date » = date des données (veille de la présentation). Les extractions antérieures à cette
+        # convention (sans « date_presentation ») portent la date du dossier : on la ramène à la veille.
+        if not data.get("date_presentation"):
+            date = (dt.date.fromisoformat(date) - dt.timedelta(days=1)).isoformat()
         out["piliers"].update(data.get("piliers") or {})
         out["sections"].update(data.get("sections") or {})
         out["kpi_definitions"].update(data.get("kpi_definitions") or {})
         out["rows"].extend(_compact_presentation(date, pr) for pr in data.get("presentations", []))
+        # provinces absentes ou dont la présentation n'a pas pu être lue (extraction version ≥ 4)
+        out["echecs"].extend({"date": date, "province": e.get("province"), "statut": e.get("statut"),
+                              "raison": e.get("raison"), "fichier": e.get("fichier")} for e in data.get("echecs") or [])
     # une même date traitée deux fois (deux dossiers) : on garde la dernière lecture
     uniques = {(r["date"], r["province"]): r for r in out["rows"]}
     out["rows"] = sorted(uniques.values(), key=lambda r: (r["date"], r["province"] or ""))
+    lues = set(uniques)
+    out["echecs"] = [e for e in {(e["date"], e["province"]): e for e in out["echecs"]}.values()
+                     if (e["date"], e["province"]) not in lues]
     print(f"  extraction: {len(fichiers)} fichier(s), {len(out['rows'])} présentation(s)")
     return out

@@ -3,8 +3,8 @@
 Données : <EXTRACTION_DIR>/PRESENTATION_JJMMAAAA/extraction/extraction_JJMMAAAA.json, produit par
 extraire_rapports.py (BDBV2026-Provincial_Reports/data/presentations) :
 indicateurs clés par province, coordination et piliers (points saillants, réalisations, défis,
-planification), fiabilité de l'extraction (4 méthodes comparées : python-pptx, XML, LibreOffice+PDF, OCR)
-et contrôles de cohérence. Les KPI Surveillance, Labo et PCI ont leur page (pages/kpis.py).
+planification), fiabilité de l'extraction (chiffres près de leur étiquette, concordance des sources, visibilité à
+l'écran), éléments à vérifier et contrôles de cohérence. Les KPI Surveillance, Labo et PCI ont leur page (pages/kpis.py).
 """
 
 from common.chrome import render_page
@@ -17,16 +17,17 @@ BODY = """
 <section class="kpis" id="kpis" aria-label="Indicateurs clés des présentations"></section>
 <article class="card">
   <header class="card-head"><h3>Indicateurs clés par province</h3>
-    <p class="card-sub">Lus sur les cartes de synthèse des présentations (à défaut, ligne Total du tableau des cas par ZS).
+    <p class="card-sub">Lus sur les cartes de synthèse des présentations (à défaut, ligne Total du tableau des cas par ZS,
+    lue par le pipeline du dépôt).
     Survolez une valeur pour voir sa diapositive d'origine.</p></header>
   <div class="table-wrap" id="table-cles"></div>
 </article>
 <section class="grid-2">
   <article class="card">
     <header class="card-head"><h3>Fiabilité de l'extraction</h3>
-      <p class="card-sub">Score sur 100 : éléments retrouvés par au moins 2 des 4 méthodes de lecture (40 %), accord du texte
-      natif (15 %), éléments vus à l'écran par l'OCR (15 %), diapositives lisibles (20 % ; une diapositive en image lue par OCR
-      compte pour moitié), cohérence des chiffres (10 %). Sans OCR : 50 / 20 / – / 20 / 10.</p></header>
+      <p class="card-sub">Score sur 100 de l'extraction (les bons chiffres aux bons indicateurs) : chiffres lus à côté de leur
+      étiquette par le PDF ou l'OCR (35 %), concordance carte / tableau par ZS / veille / KPI (20 %), chiffres visibles à
+      l'écran (15 %), diapositives lisibles (15 %), lecture du texte (15 %). Plafond 85 sans OCR, 70 sans PDF ni OCR.</p></header>
     <div class="chart" id="chart-fiabilite"></div>
   </article>
   <article class="card">
@@ -36,9 +37,16 @@ BODY = """
   </article>
 </section>
 <article class="card">
-  <header class="card-head"><h3>Détail de la fiabilité</h3></header>
-  <div class="table-wrap" id="table-fiabilite"></div>
+  <header class="card-head"><h3>À vérifier dans les PowerPoint</h3>
+    <p class="card-sub">Présentations absentes ou illisibles, sources discordantes, chiffres lus dans le fichier mais absents de
+    l'écran, texte invisible écarté (forme masquée, texte de la couleur du fond, hors de la diapositive), chiffres lus loin de
+    leur étiquette.</p></header>
+  <div class="table-wrap" id="table-averifier"></div>
 </article>
+<details class="card raw-values">
+  <summary><strong>Détail de la fiabilité</strong> <span class="muted">chiffres par province et par méthode</span></summary>
+  <div class="table-wrap" id="table-fiabilite"></div>
+</details>
 <article class="card">
   <header class="card-head"><h3>Coordination et piliers, toutes provinces</h3>
     <p class="card-sub">Chaque élément porte sa province, sa diapositive et le nombre de méthodes qui l'ont retrouvé ;

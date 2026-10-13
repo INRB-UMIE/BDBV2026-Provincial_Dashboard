@@ -9,7 +9,9 @@ def test_extraction_is_loaded_compactly():
     ext = data_sources.load_extractions()
     assert len(ext["rows"]) == 1
     r = ext["rows"][0]
-    assert r["date"] == "2026-09-30" and r["province"] == "Tshopo"
+    # extraction sans « date_presentation » (ancienne convention) : la date du dossier (30/09) est ramenée à la
+    # date des données, la veille (29/09)
+    assert r["date"] == "2026-09-29" and r["province"] == "Tshopo"
     assert r["cles"]["cumul_confirmes"]["n"] == 45 and r["cles"]["cumul_confirmes"]["s"] == 2
     assert r["fiabilite"]["score"] == 95 and r["n_methodes"] == 3
     pil = {p["id"]: p for p in r["piliers"]}
@@ -90,10 +92,16 @@ def test_week_page_is_built(tmp_path, monkeypatch):
     monkeypatch.setattr(build_dashboard, "OUTPUT_DIR", tmp_path)
     assert build_dashboard.main() == 0
     page = (tmp_path / "semaine.html").read_text(encoding="utf-8")
-    assert 'data-view="week"' in page and 'id="week-pillars"' in page and 'id="week-kpis"' in page
+    assert 'data-view="week"' in page and 'id="week-pillars"' in page and 'id="week-priorites"' in page
+    assert 'id="export-pdf"' in page and 'id="export-word"' in page and 'id="zs-alert"' in page
+    assert 'id="week-heatmap"' in page and 'id="week-lecture"' in page and '"semaines"' in page
     assert 'id="week-province"' in page and 'id="week-section"' in page and 'id="week-pillar"' in page
     assert "Confirmation du 45e cas" in page                       # toute l'extraction est embarquée
+    assert '"semaines"' not in (tmp_path / "synthese.html").read_text(encoding="utf-8")   # priorités : pages qui les affichent
     assert 'href="semaine.html"' in (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert '"alertes_zs"' in (tmp_path / "synthese.html").read_text(encoding="utf-8")     # bandeau ZS sur toutes les pages
+    prov = next(tmp_path.glob("province-*.html")).read_text(encoding="utf-8")
+    assert 'id="prov-prio"' in prov and '"semaines"' in prov                              # encadré priorités
 
 
 def test_missing_province_totals_come_from_the_presentation_card():

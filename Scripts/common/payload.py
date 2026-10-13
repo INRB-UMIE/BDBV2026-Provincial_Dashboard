@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+from common import priorites
 from common.data_sources import load_extractions, load_manifest, load_qa, load_timeseries
 from common.paths import DATA_REPO, province_filename
 
@@ -38,8 +39,14 @@ def build_shared_payload() -> dict:
         **ts,
         "qa": qa,
         "extraction": extraction["rows"],
+        "extraction_echecs": extraction.get("echecs", []),
         "extraction_labels": {"piliers": extraction["piliers"], "sections": extraction["sections"],
                               "kpi": extraction.get("kpi_definitions") or {}},
+        # priorités hebdomadaires (moteur épidémiologique, common/priorites.py)
+        "semaines": priorites.semaines(ts["summary"], ts["cases"], extraction["rows"]),
+        "priorites_def": priorites.definitions(),
+        # nouvelles ZS touchées et ZS réactivées, jour par jour (bandeau d'alerte de toutes les pages)
+        "alertes_zs": priorites.alertes_zs(ts["summary"], ts["cases"], extraction["rows"]),
     }
     n = {k: len(v) for k, v in ts.items()}
     print(f"  payload: {len(dates)} date(s), {len(provinces)} province(s), rows {n}, qa {len(qa)}")
